@@ -9,6 +9,8 @@
 
 她该长成什么，见 [VISION.md](VISION.md)；每一版的改动见 [CHANGELOG.md](CHANGELOG.md)。
 
+后续开发草案：[概念集合与偏好系统设计](docs/CONCEPT-SYSTEM-DESIGN.md) · [决策观察与关键文件版本设计](docs/DECISION-OBSERVABILITY.md)。两份草案尚未实现。
+
 ## ⚠️ 默认值是按「刚创的小号」定的（先看这个）
 
 新装用户的默认配置是**保守**的。原因很直接：**长时间高频轮询是小号被风控的头号原因** ✗
