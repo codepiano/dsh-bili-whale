@@ -1,23 +1,26 @@
 import { guardedFetch as fetch } from '../lib/traffic.mjs'
-// 选题器：照"她自己的偏好"挑今天该看什么。**只读**，不产生任何对外动作。
+// 选题器：概念群竞争影响搜索与阅读清单。只读平台；active 会更新本地决策和疲劳。
 //
-// 用法: node feed.mjs [--n 6] [--per 2] [--pool 30]
-// 数据来源：~/.dsh/whale-diary.md 的「爱看」一行（偏好关键词）+「看过的」表格（防重复）
-//          + commented-videos.md（已评论过的视频也排除）
-//
-// 为什么这么做（2026-10-14 主人定的方向）：主人要的是"有日子的鱼"，
-// 所以"看什么"不该由别人喂，而该由她自己的偏好决定 —— 偏好写在日记里，这个脚本只负责照它去捞。
+// 用法: node feed.mjs [--n 6] [--per 2] [--pool 60] [--seed 文本] [--run-id 本轮ID] [--json]
+// 数据来源：SQLite 概念群、统一配置偏好（旧日记兜底）、搜索/热门/排行/关注。
+// 日记、评论账本、收藏与反馈记录用于历史排除；平台访问只读。
 import fs from 'node:fs'
 import path from 'node:path'
 import { config } from '../lib/config.mjs'
 import crypto from 'node:crypto'
+import { FeedConcepts } from '../lib/concept-system/feed.mjs'
 import { dshPath } from '../lib/paths.mjs'
 
 
 const argv = process.argv.slice(2)
 const opt = {}
 for (let i = 0; i < argv.length; i += 1) {
-  if (argv[i].startsWith('--')) opt[argv[i].slice(2)] = argv[i + 1]?.startsWith('--') ? true : argv[++i] ?? true
+  if (!argv[i].startsWith('--')) throw Error('feed 不接受位置参数')
+  const [name,...value] = argv[i].slice(2).split('=')
+  if (!['n','per','pool','source','seed','run-id','json'].includes(name)) throw Error('未知 feed 参数：'+name)
+  if (name === 'json') { opt.json=true; continue }
+  opt[name] = value.length ? value.join('=') : argv[++i]
+  if (!opt[name] || opt[name].startsWith('--')) throw Error('feed 参数缺少值：'+name)
 }
 const N = Number(opt.n ?? 6)
 const PER = Number(opt.per ?? 2)
@@ -26,6 +29,22 @@ const PER = Number(opt.per ?? 2)
 //                 pool=60 → 出满 5 条，两条 DSH/AI 相关 + 两条猫咪 + 一条大肥鱼 ✓
 //   代价：每个关键词多抓几条（搜索请求数不变 ✓ 只是每页多取几条 ✓）
 const POOL = Number(opt.pool ?? 60)
+
+if (![N,PER].every(v=>Number.isInteger(v)&&v>=1&&v<=20)||!Number.isInteger(POOL)||POOL<1||POOL>200) throw Error('n/per 须为 1–20，pool 须为 1–200 的整数')
+const SOURCE_HOT=String(opt.source??'all')
+if (!['search','popular','rank','following','all'].includes(SOURCE_HOT)) throw Error('无效 feed source')
+const concepts = new FeedConcepts({config:config(),runId:opt['run-id'],seed:opt.seed??opt['run-id'],request:{source:SOURCE_HOT,pool:POOL}})
+function printSlate(selection) {
+  for (const [i,x] of selection.selected.entries()) {
+    console.log(`  ${String(i+1).padStart(2)}. ${x.bv}  ${String(x.d).padStart(4)}s  弹幕${String(x.dm).padStart(7)}  播放${String(x.play).padStart(9)}  ${x.t.slice(0,40)}  @${x.up} ${x._hits.length ? '['+x._hits.join('+')+']' : ''}`)
+  }
+}
+const resumed=opt['run-id']?concepts.resume({n:N,per:PER}):null
+if(resumed) {
+  if(opt.json)console.log(JSON.stringify(resumed))
+  else {console.log(`恢复本轮原清单，不重新搜索或增加疲劳：run=${resumed.run_id} · seed=${resumed.seed}`);printSlate(resumed)}
+  process.exit(0)
+}
 
 const HOME = (process.env.USERPROFILE || process.env.HOME || '/')
 const diary = dshPath('whale-diary.md')
@@ -42,7 +61,7 @@ try {
   // 兼容旧写法：日记里若仍写着「爱看」，只在配置没给偏好时兜底（日记应回归纯叙事）
   if (m && !prefs.length) prefs = m[1].split(/[·、,，]/).map((s) => s.trim()).filter(Boolean)
   for (const bv of text.matchAll(/\bBV[0-9A-Za-z]{10}\b/g)) seen.add(bv[0])
-} catch { console.log('（读不到日记，用默认偏好）') }
+} catch { console.error('（读不到日记，用默认偏好）') }
 try {
   for (const bv of fs.readFileSync(audit, 'utf8').matchAll(/\bBV[0-9A-Za-z]{10}\b/g)) seen.add(bv[0])
 } catch { /* 没有审计表也无妨 */ }
@@ -51,20 +70,6 @@ try {
   const ledger=JSON.parse(fs.readFileSync(path.join(HOME,'.bili-ai/quota.json'),'utf8'))
   for(const row of ledger.log??[])if(row.type==='comment'&&/^BV:BV[0-9A-Za-z]{10}$/.test(row.target??''))seen.add(row.target.slice(3))
 } catch(e) {if(e.code!=='ENOENT')throw Error('评论账本无法读取，停止选题以免重复分享')}
-
-const cred = JSON.parse(fs.readFileSync(path.join(HOME, '.bili-ai', 'credentials.json'), 'utf8'))
-const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
-const H = { 'user-agent': UA, referer: 'https://search.bilibili.com/', cookie: `SESSDATA=${cred.sessdata}; bili_jct=${cred.bili_jct}; buvid3=${cred.buvid3}` }
-const MIXIN_TAB = [46,47,18,2,53,8,23,32,15,50,10,31,58,3,45,35,27,43,5,49,33,9,42,19,29,28,14,39,12,38,41,13,37,48,7,16,24,55,40,61,26,17,0,1,60,51,30,4,22,25,54,21,56,59,6,63,57,62,11,36,20,34,44,52]
-const keyOf = (u) => u.slice(u.lastIndexOf('/') + 1, u.lastIndexOf('.'))
-const nav = await (await fetch('https://api.bilibili.com/x/web-interface/nav', { headers: H })).json()
-const mixin = MIXIN_TAB.map((i) => (keyOf(nav.data?.wbi_img?.img_url ?? '') + keyOf(nav.data?.wbi_img?.sub_url ?? ''))[i]).join('').slice(0, 32)
-const wbi = (p) => {
-  const wts = Math.round(Date.now() / 1000)
-  const q = Object.keys({ ...p, wts }).sort().map((k) => `${encodeURIComponent(k)}=${encodeURIComponent(String(k === 'wts' ? wts : p[k]).replace(/[!'()*]/g, ''))}`).join('&')
-  return `${q}&w_rid=${crypto.createHash('md5').update(q + mixin).digest('hex')}`
-}
-const secs = (s) => { const p = String(s).split(':').map(Number); return p.length === 2 ? p[0] * 60 + p[1] : p[0] * 3600 + p[1] * 60 + p[2] }
 
 // 2026-10-22：搜索关键词也要用切出来的短词 ✗ 不能拿「鬼畜与怀旧向剪辑」整句去搜（搜不出东西 ✗）
 //   规则：每个偏好取一个最能搜到东西的词 —— 有分段就取第一段（鬼畜 ✓ / 怀旧 ✓），
@@ -87,7 +92,25 @@ function searchKeywordOf(p) {
   }
   return grams[grams.length - 1] ?? String(p)
 }
-const searchKeywords = [...new Set(prefs.slice(0, 6).map(searchKeywordOf))]
+const legacyKeywords = [...new Set(prefs.slice(0, 6).map(searchKeywordOf))]
+const interestSearch = await concepts.plan(legacyKeywords)
+const searchKeywords = interestSearch.keywords
+
+const cred = JSON.parse(fs.readFileSync(path.join(HOME, '.bili-ai', 'credentials.json'), 'utf8'))
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
+const H = { 'user-agent': UA, referer: 'https://search.bilibili.com/', cookie: `SESSDATA=${cred.sessdata}; bili_jct=${cred.bili_jct}; buvid3=${cred.buvid3}` }
+const MIXIN_TAB = [46,47,18,2,53,8,23,32,15,50,10,31,58,3,45,35,27,43,5,49,33,9,42,19,29,28,14,39,12,38,41,13,37,48,7,16,24,55,40,61,26,17,0,1,60,51,30,4,22,25,54,21,56,59,6,63,57,62,11,36,20,34,44,52]
+const keyOf = (u) => u.slice(u.lastIndexOf('/') + 1, u.lastIndexOf('.'))
+const nav = await (await fetch('https://api.bilibili.com/x/web-interface/nav', { headers: H })).json()
+const mixin = MIXIN_TAB.map((i) => (keyOf(nav.data?.wbi_img?.img_url ?? '') + keyOf(nav.data?.wbi_img?.sub_url ?? ''))[i]).join('').slice(0, 32)
+const wbi = (p) => {
+  const wts = Math.round(Date.now() / 1000)
+  const q = Object.keys({ ...p, wts }).sort().map((k) => `${encodeURIComponent(k)}=${encodeURIComponent(String(k === 'wts' ? wts : p[k]).replace(/[!'()*]/g, ''))}`).join('&')
+  return `${q}&w_rid=${crypto.createHash('md5').update(q + mixin).digest('hex')}`
+}
+const secs = (s) => { const p = String(s).split(':').map(Number); return p.length === 2 ? p[0] * 60 + p[1] : p[0] * 3600 + p[1] * 60 + p[2] }
+
+
 
 // 2026-10-23 改（主人：feed 27 秒太久 ✗）：
 //   以前 6 个词 × 2 种排序 = 12 次搜索 ✗ 加上请求保护层的 1500ms → 18 秒 ✗
@@ -132,8 +155,6 @@ for (const [kwIndex, kw] of searchKeywords.entries()) {
 
 // ── #3 更多来源（2026-10-18 加，Kimi 评审指出：只搜关键词 = 只刷"搜索"，不是刷 B 站）
 //   --source search（默认）| popular（热门）| rank（排行榜）| all（三个都要）
-const SOURCE_HOT = String((process.argv.find((a) => a.startsWith('--source=')) ?? '').split('=')[1] ?? '')
-  || (process.argv.includes('--source') ? String(process.argv[process.argv.indexOf('--source') + 1] ?? 'all') : 'all')
 async function fetchPopular() {
   const j = await (await fetch('https://api.bilibili.com/x/web-interface/popular?pn=1&ps=20', { headers: H })).json()
   for (const it of (j?.data?.list ?? [])) {
@@ -261,8 +282,10 @@ const selfName = String(config().self?.name ?? "")
 //   只是丢掉「几乎无人看过」的：播放<300 且 弹幕<3，且不是多偏好命中 ✓
 const looksLikeJunk = (x) => x.play < 300 && x.dm < 3
 const uniq = [...new Map(pool.map((x) => [x.bv, x])).values()]
+  .filter((x) => /^BV[0-9A-Za-z]{10}$/.test(x.bv) && Number.isFinite(x.d) && x.d >= 0 && Number.isFinite(x.dm) && x.dm >= 0 && Number.isFinite(x.play) && x.play >= 0)
   .filter((x) => !seen.has(x.bv) && !likedBVs.has(x.bv) && !favBVs.has(x.bv))
   .filter((x) => !(selfName && String(x.up ?? "").includes(selfName)))
+  .filter((x) => !dislike.some(term => String(term).trim() && x.t.toLowerCase().includes(String(term).trim().toLowerCase())))
   // 2026-10-22：碎屑丢掉落（多偏好命中 ≥2 的留着 ✓ 那可能真是小众宝藏）
   .filter((x) => !looksLikeJunk(x) || hitsOf(x.t).length >= 2)
 const scoreOf = (x) => densityOf(x) * 3 + hitsOf(x.t).length * 4 + boostOf(x.t)
@@ -283,18 +306,19 @@ for (const x of uniq) {
   diversified.push(x)
 }
 
-console.log(`偏好（来自日记）: ${prefs.join(' · ')}`)
-console.log(`反馈回流: 被赞 ${likedEvents.length} 条 · 她收藏 ${favItems.length} 条 → 学会 ${learnedTokens.length} 个主题词`)
-console.log(`已看过/已评论过（已排除）: ${seen.size} 个 BV`)
-console.log(`候选池: ${pool.length} 条 → 去重去已看后 ${uniq.length} 条\n`)
-console.log(`今天可以看这几条（每词最多 ${PER} 条，共 ${N} 条）：`)
-const perKw = {}
-let shown = 0
-for (const x of diversified) {
-  if (shown >= N) break
-  perKw[x.kw] = perKw[x.kw] ?? 0
-  // 多样性已在上一步做过 → 这里不再二次限流 ✓
-  perKw[x.kw] += 1; shown += 1
-  console.log(`  ${String(shown).padStart(2)}. ${x.bv}  ${String(x.d).padStart(4)}s  弹幕${String(x.dm).padStart(7)}  播放${String(x.play).padStart(9)}  ${x.t.slice(0, 40)}  @${x.up} ${x._hits.length ? "[" + x._hits.join("+") + "]" : ""}`)
+const selection = await concepts.select({candidates:uniq,legacy:diversified,n:N,per:PER})
+if (opt.json) {
+  console.log(JSON.stringify({...selection,search:interestSearch,candidate_count:uniq.length}))
+} else {
+  console.log(`偏好（配置优先，旧日记兜底）: ${prefs.join(' · ')}`)
+  console.log(`兴趣选题: ${selection.mode}${selection.run_id ? ' · run='+selection.run_id+' · seed='+selection.seed : ''}`)
+  console.log(`搜索词: ${searchKeywords.join(' · ')}`)
+  if(selection.fallback)console.log(`概念兜底: ${selection.fallback}`)
+  console.log(`反馈回流: 被赞 ${likedEvents.length} 条 · 她收藏 ${favItems.length} 条 → 学会 ${learnedTokens.length} 个主题词`)
+  console.log(`已看过/已评论过（已排除）: ${seen.size} 个 BV`)
+  console.log(`候选池: ${pool.length} 条 → 去重去已看后 ${uniq.length} 条\n`)
+  console.log(`今天选入阅读清单（同类最多 ${PER} 条，上限 ${N} 条；不表示已经看过）：`)
+  printSlate(selection)
+  if(selection.mode==='shadow')console.log(`影子建议（未采用，不更新疲劳）：${selection.proposed.map(x=>x.bv).join(' · ')}`)
+  console.log('\n按清单顺序阅读：node bili.mjs debrief <BV> → 然后把想法写进日记；清单不是观看回执。')
 }
-console.log('\n看完跑：node bili.mjs debrief <BV>   → 然后把"想法"写进日记的「想说」区（不发）')

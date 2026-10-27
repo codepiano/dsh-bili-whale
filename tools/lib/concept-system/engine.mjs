@@ -125,6 +125,49 @@ export function scoreDecision(state, input, now) {
     state_version: revision(state),
   };
 }
+// Shared mutation only. Callers must check preview freshness or compute and
+// commit under the same SQLite writer transaction (feed's atomic slate).
+export function commitScoredDecision(state, preview, input, now) {
+  const selected = input.selected ?? preview.winner,
+    row = preview.rows.find((r) => r.label === selected && r.eligible);
+  if (!row) throw Error("Selected option is not eligible");
+  const changes = [];
+  for (const id of new Set(
+    row.contributions.map((c) => c.collection_id),
+  )) {
+    const c = state.collections[id],
+      old = fatigue(c, preview.input.scene, now, state.parameters);
+    c.fatigue[preview.input.scene] = {
+      value: clamp(old + state.parameters.fatigueStep, 0, 0.9),
+      at: now,
+    };
+    changes.push({
+      id,
+      before: old,
+      after: c.fatigue[preview.input.scene].value,
+    });
+  }
+  const id = crypto.randomUUID();
+  const result = {
+    id,
+    preview_id: input.preview_id,
+    trace_id: preview.input.trace_id ?? null,
+    parent_decision_id: preview.input.parent_decision_id ?? null,
+    scene: preview.input.scene,
+    subject: preview.input.subject,
+    selected,
+    suggested: preview.winner,
+    overridden: selected !== preview.winner,
+    reason: input.reason,
+    at: now,
+    collection_ids: [
+      ...new Set(row.contributions.map((c) => c.collection_id)),
+    ],
+    fatigue_changes: changes,
+  };
+  state.decisions[id] = result;
+  return result;
+}
 export class ConceptEngine {
   constructor(store = new ObservationStore()) {
     this.store = store;
@@ -262,44 +305,8 @@ export class ConceptEngine {
             throw Error("Decision state conflict; preview again");
           if (now - preview.at > 15 * 60000 || now < preview.at)
             throw Error("Preview expired; preview again");
-          const selected = input.selected ?? preview.winner,
-            row = preview.rows.find((r) => r.label === selected && r.eligible);
-          if (!row) throw Error("Selected option is not eligible");
-          const changes = [];
-          for (const id of new Set(
-            row.contributions.map((c) => c.collection_id),
-          )) {
-            const c = state.collections[id],
-              old = fatigue(c, preview.input.scene, now, state.parameters);
-            c.fatigue[preview.input.scene] = {
-              value: clamp(old + state.parameters.fatigueStep, 0, 0.9),
-              at: now,
-            };
-            changes.push({
-              id,
-              before: old,
-              after: c.fatigue[preview.input.scene].value,
-            });
-          }
-          const id = crypto.randomUUID();
-          result = {
-            id,
-            preview_id: input.preview_id,
-            trace_id: preview.input.trace_id ?? null,
-            parent_decision_id: preview.input.parent_decision_id ?? null,
-            scene: preview.input.scene,
-            subject: preview.input.subject,
-            selected,
-            suggested: preview.winner,
-            overridden: selected !== preview.winner,
-            reason: input.reason,
-            at: now,
-            collection_ids: [
-              ...new Set(row.contributions.map((c) => c.collection_id)),
-            ],
-            fatigue_changes: changes,
-          };
-          state.decisions[id] = result;
+          result = commitScoredDecision(state, preview, input, now);
+          const id = result.id;
           saved.committed = id;
           d.savePreview(input.preview_id, saved);
           emit("decision.committed", result, {

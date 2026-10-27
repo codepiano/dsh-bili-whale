@@ -113,3 +113,10 @@ test('wake prompt states the current share.via and only that route',()=>{
   assert.match(viaDm,/必须带 --share/)
   assert.doesNotMatch(viaComment,/必须带 --share/)
 })
+test('night feed run-id survives delivery retries and differs between scheduled plans',()=>{
+  const st={date:'2026-10-28',windowKey:'evening',atMs:123456,wakes:1,withinWindow:'1/2'}
+  const id=s=>wakePrompt(s,'').match(/--run-id (night-[a-f0-9]+)/)[1]
+  assert.equal(id(st),id({...st}))
+  assert.notEqual(id(st),id({...st,atMs:123457}))
+  assert.match(wakePrompt(st,''),/本轮重试沿用此 ID/)
+})
