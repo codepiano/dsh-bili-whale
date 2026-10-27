@@ -40,7 +40,7 @@ function evidenceIdentity(s, sourceId) {
   const source = s.sources[sourceId];
   return hash([source.actor, source.type, source.ref || source.excerpt]);
 }
-function collectionStrength(c, s) {
+export function collectionStrength(c, s) {
   const items = c.members
       .map((id) => s.members[id])
       .filter((m) => m?.status === "accepted"),

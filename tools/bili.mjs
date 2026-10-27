@@ -9,7 +9,7 @@ import { NODE_EXE } from './lib/nodebin.mjs'   // 2026-10-21：别用 process.ex
 const here = path.dirname(fileURLToPath(import.meta.url))
 const map = {
   concept: ['commands/concept.mjs', '概念候选、集合、影子决策和反馈；help 查看工具接口'],
-  observe: ['commands/observe.mjs', '本地观察记录：capture / events / versions / diff / object / response / status'],
+  observe: ['commands/observe.mjs', '本地观察记录：capture / events / versions / diff / object / response / status / serve'],
   traffic: ['commands/traffic.mjs', '请求保护状态 / 人工核查后恢复'],
   // —— 读（不需要写操作，安全） ——
   session: ['verify/session.mjs', '确认凭据属于哪个号'],
@@ -76,5 +76,11 @@ if (!entry) {
   console.error(`未知命令: ${cmd}\n跑 "node bili.mjs help" 看清单。`)
   process.exit(2)
 }
-const r = spawnSync(NODE_EXE, [path.join(here, entry[0]), ...translateNamed(cmd, rest)], { stdio: 'inherit' })
-process.exit(r.status ?? 1)
+// The long-running observer server owns this process so SIGTERM cannot orphan a child.
+if (cmd === 'observe' && rest[0] === 'serve') {
+  const { observeCommand } = await import('./commands/observe.mjs')
+  await observeCommand(rest)
+} else {
+  const r = spawnSync(NODE_EXE, [path.join(here, entry[0]), ...translateNamed(cmd, rest)], { stdio: 'inherit' })
+  process.exit(r.status ?? 1)
+}

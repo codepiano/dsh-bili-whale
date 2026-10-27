@@ -12,7 +12,9 @@
   ],
   "type": "module",
   "scripts": {
-    "test": "node --test tests/*.test.mjs"
+    "test": "node --test tests/*.test.mjs",
+    "build:observer": "node tools/observer-ui/build.mjs",
+    "prepack": "node tools/observer-ui/build.mjs"
   },
   "main": "lib/index.js",
   "exports": {
@@ -35,7 +37,8 @@
     "DM-HISTORY-FIX.md",
     "BUGFIX-2026-10-25.md",
     "QR-LOGIN-2026-10-25.md",
-    "docs"
+    "docs",
+    "tools/observer-ui/dist"
   ],
   "dsh": {
     "bundle": {
@@ -51,5 +54,14 @@
     "@modelcontextprotocol/sdk": "1.32.2",
     "qrcode": "1.5.4",
     "zod": "3.25.76"
+  },
+  "devDependencies": {
+    "@mantine/core": "9.7.4",
+    "@mantine/hooks": "9.7.4",
+    "@tabler/icons-react": "3.50.0",
+    "diff": "9.0.0",
+    "esbuild": "0.28.2",
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
   }
 }

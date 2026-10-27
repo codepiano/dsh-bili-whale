@@ -378,6 +378,18 @@ sudo apt install ffmpeg    # Debian / Ubuntu
 
 ---
 
+## 本地观察页面
+
+开发分支提供基于 React 和 Mantine 的只读页面：查看概念集合、决策过程，以及人格文件的历史差异。
+
+```bash
+# 在独立开发副本中构建，再启动本机页面
+npm run build:observer
+node tools/bili.mjs observe serve
+```
+
+终端打印随机空闲端口的访问地址，Ctrl+C 停止。页面不会自动创建数据库、迁移数据或改变学习状态。[完整使用与验证说明](docs/CONCEPT-SYSTEM-V1.md#mantine-本地观察页面)。
+
 ## 测试（v0.4.0 起自带）
 
 在独立 checkout 中安装锁定依赖（扫码登录使用 `qrcode`），再运行完整测试：
