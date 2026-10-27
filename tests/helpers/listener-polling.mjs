@@ -76,5 +76,7 @@ try {
   await new Promise(r=>setImmediate(r));delta(before,[1,1])
   cfg.diary={push:false};save();before=counts();s.invalidate(false)
   await new Promise(r=>setImmediate(r));delta(before,[0,0])
+  // A sparse legacy listener config must use the same defaults as settings and CLI.
+  cfg.listen = {}; save(); now += 900000; before = counts(); await both(); delta(before, [1, 0])
   console.log('PASS: fixed idle cadence, message arrival, failures/recovery, malformed DM, toggle, windows, partial feed, pause, unrelated save')
 } finally {s.stop();fs.rmSync(home,{recursive:true,force:true})}

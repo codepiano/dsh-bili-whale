@@ -4,7 +4,8 @@ import crypto from 'node:crypto'
 import { setTimeout as delay } from 'node:timers/promises'
 import { configPath } from './paths.mjs'
 
-export const RISK_DEFAULTS = { minGapMs: 1500, readHourly: 600, readDaily: 3000, writeHourly: 12, writeDaily: 30, writeGapSec: 120, dmGapSec: 60 }
+import { RISK_DEFAULTS } from './defaults.mjs'
+export { RISK_DEFAULTS } from './defaults.mjs'
 const digest = value => crypto.createHash('sha256').update(value).digest('hex')
 export function riskSettings() {
   let cfg = {}

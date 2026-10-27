@@ -46,8 +46,8 @@
 由当前模型逐条判；疑似比例 ≥ **30%（写死）** 就暂缓这次分享并推送到你配置的渠道。
 只对「主动视频 @ 分享」生效，普通回复/动态/私信/弹幕都不走。细节见 [AI-SHARE-TRIAL.md](AI-SHARE-TRIAL.md)。
 
-**② 请求保护层**——全局请求间隔 600ms（跨进程）、读 3000/天、写 30/天、撞 412 全局暂停、防重复发送。
-这些值**写死不给旋钮**（给了也不一定按你填的走 ✗ 那不如不给）。想看真实值：`node tools/bili.mjs traffic status`。
+**② 请求保护层**——默认全局请求间隔 1500ms（跨进程）、读 600/时与 3000/天、写 12/时与 30/天、撞 412/429 全局暂停、防重复发送。
+这些预算与冷却可通过配置文件的 `risk` 调整；请求间隔最低 500ms、普通写冷却最低 30 秒，私信冷却允许设为 0。查看实际生效值：`node tools/bili.mjs traffic status`。
 
 **③ 监听与失败退避**——私信 / 评论按配置间隔轮询（默认 60 秒），无消息不降频。只有失败才翻倍退避，默认间隔下最长 15 分钟；成功读取后恢复基础间隔。平台暂停仍优先。
 
@@ -95,12 +95,12 @@
 
 - 存在 `~/.bili-ai/persona.md`（和凭据、账本放在一起 —— 换机器时拷 `.bili-ai` 就带着走 ✓）
 - **只影响她**，不影响你别的会话 ✓
-- 每次唤醒 / 私信 / 评论 / 弹幕 / 直播间的提示都会附上（**取前 3000 字**）
+- 每次唤醒 / 私信 / 评论 / 弹幕 / 直播间的提示都会附上（**最多 20000 字**）
 - 和上面那三个字段（角色名 / 怎么称呼你 / 怎么自称）冲突时，**以人设文件为准** ✓
 - 清空再注入 = 撤销人设 ✓
-- 上限 20000 字（注入只取前 3000，别把上下文撑爆）
+- 保存与注入的上限均为 20000 字；建议保持简洁以减少上下文开销
 
-**建议写法**（顺序就按这个来，因为只取前 3000 字）：
+**建议写法**（先写身份和关键约束）：
 
 ```markdown
 # 我是谁
@@ -166,12 +166,12 @@ dsh plugin --profile desktop add "link:C:\path\to\dsh-bili-whale"
 
 # 2) 重启一次 DSH（bundle 层要重启才组装）
 
-# 3) 打开「设置 → 养鱼」（不是 /dsh-bili/ 那个页面 —— 那个被 DSH 的信任栅栏挡着 ✗）
+# 3) 打开「设置 → 养鱼」（设置接口位于 /dsh-bili/api/*，没有独立的 /dsh-bili/ 设置页面）
 ```
 
 **设置页里三件事**：
 
-1. **填 cookie** —— 在 `bilibili.com` 页面按 **F12 → Application（应用）→ Cookies → https://www.bilibili.com**，
+1. **登录 B 站** —— 优先点「扫码登录」，用插件账号扫码确认。也可手动导入 Cookie：在 `bilibili.com` 页面按 **F12 → Application（应用）→ Cookies → https://www.bilibili.com**，
    手动复制 `SESSDATA`、`bili_jct`、`buvid3` 三个值粘进设置页 ✓
    （⚠️ 别用 `document.cookie` ✗ —— `SESSDATA` 是 **HttpOnly**，脚本里读不到，照那个做会得到一份缺件的 cookie 然后卡在体检）
 2. **填你的 mid + 昵称** —— 分享评论要 @ 的人
@@ -183,7 +183,9 @@ dsh plugin --profile desktop add "link:C:\path\to\dsh-bili-whale"
 > ✅ **保存即生效**：作息窗口 / 评论监听 / 直播间开关 / 消息推送 / 分享闸门，都是保存后立刻重算 ✓
 > ⚠️ 只有**换插件代码/版本**才需要重启 DSH（改配置不用 ✗）
 
-设置保存在 `~/.dsh/bili-whale.config.json`（**不含凭据**）；凭据单独在 `~/.bili-ai/credentials.json`，**永远不回显**。
+默认配置由 `tools/lib/defaults.mjs` 统一定义，设置接口、调度器和 CLI 共用；缺失字段会补默认值，已保存的显式值保留。配置模板 `tools/templates/config.example.json` 与默认值一致。
+
+设置保存在 `~/.dsh/bili-whale.config.json`（可通过 `BILI_WHALE_CONFIG` 指定路径，**不含凭据**）；凭据单独在 `~/.bili-ai/credentials.json`，**永远不回显**。
 
 ---
 
@@ -376,14 +378,15 @@ sudo apt install ffmpeg    # Debian / Ubuntu
 
 ## 测试（v0.4.0 起自带）
 
-不需要安装任何第三方依赖：
+在独立 checkout 中安装锁定依赖（扫码登录使用 `qrcode`），再运行完整测试：
 
 ```bash
 cd <插件目录>
-node --test tests/planner.test.mjs tests/integration.test.mjs tests/updates.test.mjs tests/supplement.test.mjs
+npm ci
+npm test
 ```
 
-57 个用例，覆盖：
+自动测试覆盖：
 
 - 计划器：跨午夜、绝对时间戳、跳过不重抽、重启后计划仍在、按真实截止排序、旧状态迁移
 - 分享策略：开关 / 评分 / 理由 / 排名，**评论与私信两条通道都测**
@@ -444,6 +447,6 @@ dsh --profile <配置档名> web --port 3099
 元信息与播放地址现通过 WBI 签名接口读取。HTTP 412/-412、非 JSON 或网络超时会显示可读错误；遇到风控请暂停并稍后重试，检查登录状态，不要连续重试。签名接口也不能保证绕过平台限制。没有视频直链时不会伪装成已完成抽帧。
 
 
-## 私信历史补读修复（本地待发布）
+## 私信历史补读（已纳入 0.4.6）
 
 私信监听改为按历史消息顺序交付，空收件箱不触发失败退避。安装方式、首次历史范围、分页上限和验证限制见 [DM-HISTORY-FIX.md](DM-HISTORY-FIX.md)。

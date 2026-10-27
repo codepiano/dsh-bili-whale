@@ -17,6 +17,16 @@ cp.execFile=(exe,args,options,cb)=>{
   return {kill(){}}
 }
 syncBuiltinESMExports()
+// Empty PATH alone is insufficient on macOS: runtime discovery also probes fixed paths.
+if (process.env.TEST_NO_NODE) {
+  const stat = fs.statSync
+  fs.statSync = (file, ...args) => {
+    if (/^node(?:\.exe)?$/.test(path.basename(String(file)))) {
+      throw Object.assign(new Error('mock missing runtime'), { code: 'ENOENT' })
+    }
+    return stat(file, ...args)
+  }
+}
 const {default:plugin}=await import('../../lib/index.js')
 const routes=new Map()
 plugin.apply({get:()=>({requestRejection:()=>null}),webServer:{register(r){routes.set(r.path,r.handler);return ()=>{}}},effect:()=>{}})

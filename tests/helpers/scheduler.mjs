@@ -26,6 +26,7 @@ await sched.tick();assert.equal(attempts,1)
 assert.equal(JSON.parse(fs.readFileSync(state)).fired,false)
 fail=false;await sched.tick();assert.equal(attempts,2)
 assert.ok(messages[0].includes('测试专属人设'))
+assert.ok(messages[0].includes('本机 share.via = comment'), 'missing share.via must default to public comment, matching settings and CLI')
 assert.ok(messages[0].includes('关掉了推送'))
 
 await sched.tick();assert.equal(attempts,2)

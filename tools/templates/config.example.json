@@ -4,23 +4,24 @@
   "_listen_note": "监听默认：评论监听【关】、私信监听【开但 60 秒一轮】。长时间高频轮询是小号被风控的头号原因 ✗ 想开评论监听自己去设置页打勾 ✓",
   "persona": {
     "name": "",
-    "ownerTitle": "主人",
+    "ownerTitle": "你",
     "selfClaim": "我",
-    "diaryTitle": ""
+    "diaryTitle": "今日摘要"
   },
   "preferences": {
     "like": [
       "AI 工具与插件",
+      "鬼畜与怀旧向剪辑",
       "猫咪",
-      "鬼畜与怀旧剪辑",
-      "动画/模型"
+      "Live2D/模型"
     ],
     "dislike": [
       "带货",
       "擦边",
       "标题党",
       "纯搬运"
-    ]
+    ],
+    "keywords": []
   },
   "owner": {
     "mid": "",
@@ -38,7 +39,9 @@
     "enabled": true,
     "minScore": 13,
     "silentAfterDays": 3,
-    "aiCommentGuard": false
+    "aiCommentGuard": false,
+    "via": "comment",
+    "aiThreshold": 30
   },
   "risk": {
     "minGapMs": 1500,
@@ -71,16 +74,19 @@
     ],
     "skipChance": 0.3,
     "maxVideos": 5,
-    "maxWakesPerDay": 1
+    "minGapMin": 10
   },
   "notify": {
     "type": "none",
     "url": "",
     "template": "text",
-    "cmd": "",
-    "path": "",
-    "args": []
+    "cmd": ""
   },
   "sessionRotateDays": 0,
-  "personaOncePerSession": false
+  "personaOncePerSession": false,
+  "diary": {
+    "push": true,
+    "enabled": true
+  },
+  "toolsPath": ""
 }
