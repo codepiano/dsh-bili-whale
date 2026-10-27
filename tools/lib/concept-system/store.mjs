@@ -8,17 +8,17 @@ import { HOME } from '../paths.mjs'
 export const stable = value => JSON.stringify(value, (_, v) => v && typeof v === 'object' && !Array.isArray(v)
   ? Object.fromEntries(Object.keys(v).sort().map(k => [k, v[k]])) : v)
 export const hash = value => crypto.createHash('sha256').update(typeof value === 'string' ? value : stable(value)).digest('hex')
-const secretKey = /^(?:cookie|authorization|credentials|sessdata|bili_jct|buvid3|access_token|refresh_token|api_key|password|secret|token)$/i
+const secretKey = /^(?:cookie|setcookie|authorization|proxyauthorization|credentials?|sessdata|bilijct|buvid3|accesstoken|refreshtoken|sessiontoken|launchtoken|apikey|password|secret|secretkey|token|auth)$/i
 export function redact(value) {
   if (Array.isArray(value)) return value.map(redact)
-  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, secretKey.test(k) ? '[REDACTED]' : redact(v)]))
+  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, secretKey.test(k.replace(/[-_]/g, '')) ? '[REDACTED]' : redact(v)]))
   if (typeof value !== 'string') return value
   return value.replace(/\b(Bearer\s+)\S+/gi, '$1[REDACTED]')
-    .replace(/\b(SESSDATA|bili_jct|buvid3|access_token|refresh_token|api_key|password|token)(\s*[=:]\s*)(?:"[^"]*"|'[^']*'|[^\s;,}&]+)/gi, '$1$2[REDACTED]')
+    .replace(/\b(SESSDATA|bili_jct|buvid3|access[-_]?token|refresh[-_]?token|api[-_]?key|password|secret|token)([\"']?\s*[=:]\s*)(?:"[^"]*"|'[^']*'|[^\s;,}&]+)/gi, '$1$2[REDACTED]')
     .replace(/https?:\/\/[^\s<>"']+/g, raw => {
       try { const u = new URL(raw); if (u.username || u.password) { u.username = ''; u.password = '' }
         // Query-bearing platform/media URLs can carry signed account-specific access.
-        if (/(?:^|\.)(?:bilibili\.com|bilivideo\.com|hdslb\.com)$/.test(u.hostname) || [...u.searchParams.keys()].some(k => /token|sign|auth|key|credential|cookie|expires|deadline|wssecret/i.test(k))) u.search = ''
+        if (/(?:^|\.)(?:bilibili\.com|bilivideo\.(?:com|cn)|hdslb\.com)$/.test(u.hostname) || [...u.searchParams.keys()].some(k => /token|sign|auth|key|credential|cookie|expires|deadline|wssecret/i.test(k))) u.search = ''
         return u.href
       } catch { return raw }
     })
@@ -38,8 +38,16 @@ function privateDir(dir) {
   fs.chmodSync(dir, 0o700)
 }
 const empty = () => ({ schema: 1, seq: 0, events: [], versions: {}, receipts: {}, state: {} })
+function canonicalDirectory(directory) {
+  const absolute = path.resolve(directory)
+  if (fs.existsSync(absolute) && fs.lstatSync(absolute).isSymbolicLink()) throw Error('Observation directory must not be a symlink')
+  let ancestor = absolute
+  const suffix = []
+  while (!fs.existsSync(ancestor)) { suffix.unshift(path.basename(ancestor)); ancestor = path.dirname(ancestor) }
+  return path.join(fs.realpathSync(ancestor), ...suffix)
+}
 export class ObservationStore {
-  constructor(directory = dataRoot(), { now = Date.now } = {}) { this.directory = path.resolve(directory); this.now = now; this.file = path.join(this.directory, 'journal.json') }
+  constructor(directory = dataRoot(), { now = Date.now } = {}) { this.directory = canonicalDirectory(directory); this.now = now; this.file = path.join(this.directory, 'journal.json') }
   read() {
     try {
       if (fs.lstatSync(this.file).isSymbolicLink()) throw Error('Journal must not be a symlink')

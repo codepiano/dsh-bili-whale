@@ -1,0 +1,10 @@
+{
+  "transport": "stdio",
+  "serverName": "bili-whale-concepts",
+  "command": "/absolute/path/to/node",
+  "args": ["/absolute/path/to/dsh-bili-whale/tools/concept-mcp.mjs"],
+  "cwd": "/absolute/path/to/dsh-bili-whale",
+  "env": { "BILI_CONCEPT_HOME": "/absolute/path/to/private/concept-system" },
+  "toolCallTimeoutMs": 30000,
+  "failOnStartupError": false
+}

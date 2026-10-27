@@ -34,7 +34,8 @@
     "LISTENER-FIX.md",
     "DM-HISTORY-FIX.md",
     "BUGFIX-2026-10-25.md",
-    "QR-LOGIN-2026-10-25.md"
+    "QR-LOGIN-2026-10-25.md",
+    "docs"
   ],
   "dsh": {
     "bundle": {
@@ -47,6 +48,8 @@
   },
   "license": "MIT",
   "dependencies": {
-    "qrcode": "1.5.4"
+    "@modelcontextprotocol/sdk": "1.32.2",
+    "qrcode": "1.5.4",
+    "zod": "3.25.76"
   }
 }

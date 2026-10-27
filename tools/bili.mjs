@@ -8,6 +8,7 @@ import { NODE_EXE } from './lib/nodebin.mjs'   // 2026-10-21：别用 process.ex
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const map = {
+  concept: ['commands/concept.mjs', '概念候选、集合、影子决策和反馈；help 查看工具接口'],
   observe: ['commands/observe.mjs', '本地观察记录：capture / events / versions / diff / object / response / status'],
   traffic: ['commands/traffic.mjs', '请求保护状态 / 人工核查后恢复'],
   // —— 读（不需要写操作，安全） ——

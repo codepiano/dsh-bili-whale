@@ -9,7 +9,7 @@
 
 她该长成什么，见 [VISION.md](VISION.md)；每一版的改动见 [CHANGELOG.md](CHANGELOG.md)。
 
-后续开发草案：[概念集合与偏好系统设计](docs/CONCEPT-SYSTEM-DESIGN.md) · [决策观察与关键文件版本设计](docs/DECISION-OBSERVABILITY.md)。两份草案尚未实现。
+后续开发草案：[概念集合与偏好系统设计](docs/CONCEPT-SYSTEM-DESIGN.md) · [决策观察与关键文件版本设计](docs/DECISION-OBSERVABILITY.md)。设计约定与当前实现边界见 [第一版使用与验证](docs/CONCEPT-SYSTEM-V1.md)；开发分支内容不代表已安装或发布。
 
 ## ⚠️ 默认值是按「刚创的小号」定的（先看这个）
 

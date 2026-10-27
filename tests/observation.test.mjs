@@ -66,3 +66,14 @@ test('watcher captures external edits and deletion and stops cleanly', async t=>
   fs.writeFileSync(file,'after');await waitFor(()=>store.versions('persona').length===2)
   fs.rmSync(file);await waitFor(()=>store.versions('persona').at(-1).status==='missing');await stop()
 })
+test('redaction covers camelCase and header secrets, quoted JSON and signed URLs',()=>{
+ const x=redact({apiKey:'s1',accessToken:'s2','X-Other':'visible','Proxy-Authorization':'s3','Set-Cookie':'s4',text:'{"apiKey":"s5"} https://example.com/private?access_token=s6'})
+ assert.doesNotMatch(JSON.stringify(x),/s[1-6]/);assert.match(JSON.stringify(x),/visible/)
+})
+test('journal replacement failure preserves prior state and event sequence together',async t=>{
+ const store=new ObservationStore(box(t));await store.transaction({},(d,emit)=>{d.state.value=1;emit('before')})
+ const before=fs.readFileSync(store.file,'utf8'),original=fs.renameSync
+ const mocked=t.mock.method(fs,'renameSync',(from,to)=>{if(to===store.file)throw Error('injected disk failure');return original(from,to)})
+ await assert.rejects(store.transaction({},(d,emit)=>{d.state.value=2;emit('after')}),/injected disk failure/)
+ mocked.mock.restore();assert.equal(fs.readFileSync(store.file,'utf8'),before)
+})
