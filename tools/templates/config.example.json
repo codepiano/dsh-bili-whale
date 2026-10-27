@@ -88,5 +88,10 @@
     "push": true,
     "enabled": true
   },
-  "toolsPath": ""
+  "toolsPath": "",
+  "conceptSystem": {
+    "observe": false,
+    "mode": "shadow",
+    "renderBudget": 400
+  }
 }

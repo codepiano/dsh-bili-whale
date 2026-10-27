@@ -3,6 +3,7 @@
 export const RISK_DEFAULTS = { minGapMs: 1500, readHourly: 600, readDaily: 3000, writeHourly: 12, writeDaily: 30, writeGapSec: 120, dmGapSec: 60 }
 
 export const DEFAULTS = {
+  conceptSystem: { observe: false, mode: 'shadow', renderBudget: 400 },
   sessionRotateDays: 0,
   personaOncePerSession: false,
   risk: RISK_DEFAULTS,
