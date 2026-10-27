@@ -42,13 +42,23 @@ export class Observer {
   async accepted(trace) { await this.store.event('prompt.accepted', { scope: 'host_received_only' }, trace) }
   async failed(trace, error) { await this.store.event('prompt.failed', { status: 'unknown', error: String(error?.message ?? error) }, trace) }
   watch() {
-    let tail = Promise.resolve(), stopped = false
-    const callbacks = []
-    for (const [role, file] of Object.entries(this.paths)) {
-      const cb = () => { if (!stopped) tail = tail.then(() => this.capture([readSource(role, file)])).catch(e => this.log('Observation capture failed: ' + e.message)) }
-      fs.watchFile(file, { interval: 1000, persistent: false }, cb); callbacks.push([file, cb])
+    let tail = Promise.resolve(), stopped = false, running = false
+    const previous = new Map()
+    // watchFile establishes its initial stat asynchronously and can miss an
+    // edit immediately after registration. Compare content snapshots instead;
+    // unchanged polls perform no SQLite writes and failed captures retry.
+    const poll = () => {
+      if (stopped || running) return
+      running = true
+      tail = tail.then(async () => {
+        const sources = Object.entries(this.paths).map(([role, file]) => readSource(role, file))
+        const changed = sources.filter(s => previous.get(s.role) !== hash(s))
+        if (changed.length) await this.capture(changed)
+        for (const s of changed) previous.set(s.role, hash(s))
+      }).catch(e => this.log('Observation capture failed: ' + e.message)).finally(() => { running = false })
     }
-    return async () => { stopped = true; for (const [file, cb] of callbacks) fs.unwatchFile(file, cb); await tail }
+    const timer = setInterval(poll, 1000); timer.unref?.(); poll()
+    return async () => { stopped = true; clearInterval(timer); await tail }
   }
   async response({ trace_id, session_id, turn_id = null, response_id = null, text, reasoning, reasoning_kind = 'unavailable', partial = false, source = 'explicit_import' }) {
     if (!trace_id || !session_id) throw Error('Explicit trace and session correlation required')
@@ -63,7 +73,7 @@ export class Observer {
 
 // DSH session/event seam verified against the installed host. No history replay or
 // private runtime access: capture only new events for explicitly tracked sessions.
-export function attachSessionEvents(ctx, observer, initialSessionId) {
+export function attachSessionEvents(ctx, observer, initialSessionId, { onEvent = async () => {} } = {}) {
   const tracked = new Set([initialSessionId]), active = new Map()
   let tail = Promise.resolve()
   const originalPrepare = observer.prepare.bind(observer)
@@ -81,17 +91,19 @@ export function attachSessionEvents(ctx, observer, initialSessionId) {
     const copy = structuredClone(event)
     tail = tail.then(async () => {
       const id = session.id
+      let prepared = false
       if (copy.type === 'user/message') {
         const text = copy.data?.content?.filter(x => x.type === 'text').map(x => x.text).join('\n')
         const queue = pending.get(id) ?? [], index = queue.findIndex(p => p.text === text)
-        if (index >= 0) { active.set(id, queue[index].trace); queue.splice(index, 1) }
-        else active.set(id, { trace_id: crypto.randomUUID(), session_id: id, correlation: 'host_message_only' })
+        if (index >= 0) { active.set(id, queue[index].trace); queue.splice(index, 1); prepared = true }
+        else if (!copy.data?.source?.kind || copy.data.source.kind === 'user') active.set(id, { trace_id: crypto.randomUUID(), session_id: id, correlation: 'host_message_only' })
       }
       const links = active.get(id) ?? { session_id: id, trace_id: null, correlation: 'unlinked_host_event' }
       const object = observer.store.object(copy)
       await observer.store.event('host.session_event', { host_type: copy.type, host_seq: copy.seq, host_time: copy.time, object,
         reasoning_kind: copy.type === 'assistant/message' && copy.data?.message?.content?.some(b => b.type === 'reasoning') ? 'provider_reasoning' : null }, links)
-      if (copy.type === 'turn/end') active.delete(id)
+      try { await onEvent(session, redact(copy), { ...links, prepared }) }
+      finally { if (copy.type === 'turn/end') active.delete(id) }
     }).catch(e => observer.log('Host observation failed: ' + e.message))
   }
   const dispose = ctx.on?.('session/event', handler)

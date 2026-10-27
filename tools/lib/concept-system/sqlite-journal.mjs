@@ -35,6 +35,16 @@ CREATE TABLE state_values(key TEXT PRIMARY KEY, payload TEXT NOT NULL CHECK(json
 CREATE TABLE concept_entities(kind TEXT NOT NULL, id TEXT NOT NULL, payload TEXT NOT NULL CHECK(json_valid(payload)), PRIMARY KEY(kind,id)) STRICT;
 `;
 const json = (x) => JSON.stringify(x);
+// Additive capability within schema 1; old read-only observers need no migration.
+const LEARNING_SCHEMA = `
+CREATE TABLE IF NOT EXISTS learning_jobs(
+ id TEXT PRIMARY KEY, session_id TEXT NOT NULL, status TEXT NOT NULL,
+ available_at INTEGER NOT NULL, lease_until INTEGER NOT NULL,
+ payload TEXT NOT NULL CHECK(json_valid(payload))
+) STRICT;
+CREATE INDEX IF NOT EXISTS learning_jobs_ready ON learning_jobs(status,available_at);
+CREATE INDEX IF NOT EXISTS learning_jobs_session ON learning_jobs(session_id,status);
+`;
 function plain(x) {
   return x !== null && typeof x === "object" && !Array.isArray(x);
 }
@@ -245,6 +255,7 @@ export class SqliteJournal {
       } else if (version !== 1 || app !== APPLICATION_ID)
         throw Error("Unsupported SQLite schema or application ID");
       db.exec("PRAGMA synchronous=FULL;");
+      db.exec(LEARNING_SCHEMA);
       return db;
     } catch (e) {
       try {
@@ -406,6 +417,18 @@ export class SqliteJournal {
         const state = loadState ? readState(db) : undefined,
           before = loadState ? flatten(state) : null;
         const d = {
+          jobs: {
+            get: (id) => {
+              const row = db.prepare("SELECT payload FROM learning_jobs WHERE id=?").get(id);
+              return row ? JSON.parse(row.payload) : null;
+            },
+            list: (sessionId = null) => db.prepare(
+              "SELECT payload FROM learning_jobs WHERE (? IS NULL OR session_id=?) AND status NOT IN ('done','failed') ORDER BY rowid",
+            ).all(sessionId, sessionId).map(r => JSON.parse(r.payload)),
+            put: (job) => db.prepare(
+              "INSERT INTO learning_jobs VALUES(?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET status=excluded.status,available_at=excluded.available_at,lease_until=excluded.lease_until,payload=excluded.payload",
+            ).run(job.id,job.session_id,job.status,job.available_at,job.lease_until,json(redact(job))),
+          },
           state,
           seq: db
             .prepare("SELECT coalesce(max(seq),0) AS seq FROM events")

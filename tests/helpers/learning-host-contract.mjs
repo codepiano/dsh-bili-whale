@@ -1,0 +1,46 @@
+// Run in a separate Electron Node process, never in the running DSH host:
+// ELECTRON_RUN_AS_NODE=1 BILI_DSH_ASAR=/path/to/app.asar <Electron> tests/helpers/learning-host-contract.mjs
+import assert from 'node:assert/strict'
+import {createRequire} from 'node:module'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import {ObservationStore} from '../../tools/lib/concept-system/store.mjs'
+import {Observer,attachSessionEvents} from '../../tools/lib/concept-system/observation.mjs'
+import {createLearningHost} from '../../lib/learning-host.js'
+
+if(!process.env.BILI_DSH_ASAR)throw Error('Set BILI_DSH_ASAR to the installed host archive')
+const require=createRequire(path.join(process.env.BILI_DSH_ASAR,'dsh','package.json'))
+const {Context}=require('@deepseek-ai/cordis')
+const {SystemPrompt,renderContextSnapshot}=require('@deepseek-ai/dsh-system-prompt')
+const root=fs.mkdtempSync(path.join(os.tmpdir(),'whale-host-contract-'))
+const ctx=new Context(),sp=new SystemPrompt(ctx,{includeHarnessIdentity:false})
+const store=new ObservationStore(root),observer=new Observer({store,paths:{}})
+const config={conceptSystem:{observe:true,learning:true,mode:'active',renderBudget:400}}
+const learning=createLearningHost({ctx,observer,config:()=>config,sessionIds:['fish'],start:false,evaluate:async()=>({candidates:[{
+  subject:'user',content:'康德 {{literal}}',tags:['topic'],scene:'general',triggers:[],exclusions:[],interpretation:'mention',
+  quote:'康德',status:'accepted',reason:'原文提及',collections:['哲学阅读'],
+}]})})
+const events=attachSessionEvents(ctx,observer,'fish',{onEvent:learning.onEvent})
+try {
+  ctx.emit('session/event',{id:'fish'},{type:'user/message',seq:1,time:Date.now(),data:{id:'owner-1',source:{kind:'user'},content:[{type:'text',text:'我最近想读康德'}]}})
+  ctx.emit('session/event',{id:'fish'},{type:'request/header',seq:2,time:Date.now(),data:{header:{config:{provider:'fixture',model:'fixture'}}}})
+  ctx.emit('session/event',{id:'fish'},{type:'turn/end',seq:3,time:Date.now(),data:{}})
+  await events.stop();await learning.worker.wake()
+  assert.equal(store.events({type:'learning.completed'}).length,1)
+  const agent={session:{id:'fish'}}
+  const assembly=await sp.assemble({agent})
+  const text=renderContextSnapshot(sp.refreshContext(assembly,{agent}))
+  assert.match(text,/康德 \{\{literal\}\}/)
+  assert.equal(assembly.contexts.filter(c=>c.name==='bili-whale-learning-context').length,1)
+  assert.equal(renderContextSnapshot(await sp.assemble({agent:{session:{id:'other'}}})), '')
+  const empty={kind:'enter',messages:[]}
+  const result=await ctx.waterfall('agent/pre-step',{agent,turn:1,step:2,signal:new AbortController().signal},()=>Promise.resolve(empty))
+  assert.equal(result,empty)
+  assert.equal(result.messages.length,0)
+  config.conceptSystem.mode='shadow'
+  assert.equal(renderContextSnapshot(await sp.assemble({agent})), '')
+  console.log(JSON.stringify({ok:true,node:process.versions.node,checks:['native Cordis event ingestion','automatic evaluation','native SystemPrompt assemble/refresh/render','literal context','session isolation','empty-step termination preserved','shadow mode']}))
+} finally {
+  await events.stop();await learning.stop();fs.rmSync(root,{recursive:true,force:true})
+}

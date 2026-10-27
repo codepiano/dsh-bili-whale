@@ -91,6 +91,7 @@
   "toolsPath": "",
   "conceptSystem": {
     "observe": false,
+    "learning": true,
     "mode": "shadow",
     "renderBudget": 400
   }

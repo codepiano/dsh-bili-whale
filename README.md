@@ -11,6 +11,8 @@
 
 后续开发草案：[概念集合与偏好系统设计](docs/CONCEPT-SYSTEM-DESIGN.md) · [决策观察与关键文件版本设计](docs/DECISION-OBSERVABILITY.md)。设计约定与当前实现边界见 [第一版使用与验证](docs/CONCEPT-SYSTEM-V1.md)；开发分支内容不代表已安装或发布。
 
+宿主接入：[自动入队、回合后评估与每次调用前注入](docs/AUTOMATIC-LEARNING.md)。启用后由程序驱动学习，无需逐次提醒或要求 DS 主动调用 MCP；默认仍关闭观察，shadow 仅学习与记录，active 才注入日常输入。
+
 ## ⚠️ 默认值是按「刚创的小号」定的（先看这个）
 
 新装用户的默认配置是**保守**的。原因很直接：**长时间高频轮询是小号被风控的头号原因** ✗

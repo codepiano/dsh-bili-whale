@@ -73,3 +73,16 @@ test('shipped example is exactly the shared defaults, excluding explanatory note
   for (const key of Object.keys(example)) if (key.startsWith('_')) delete example[key]
   assert.deepEqual(example, DEFAULTS)
 })
+test('learning switch preserves false across host and CLI; non-boolean input is rejected before saving', async () => {
+  const saved=await settings('POST',{conceptSystem:{learning:false}})
+  assert.equal(saved.conceptSystem.learning,false)
+  assert.deepEqual(saved.conceptSystem,cliConfig().conceptSystem)
+  const before=fs.readFileSync(process.env.BILI_WHALE_CONFIG,'utf8')
+  await new Promise((resolve,reject)=>{
+    const req=Readable.from([Buffer.from(JSON.stringify({conceptSystem:{learning:'yes'}}))])
+    req.method='POST';req.headers={host:'127.0.0.1'}
+    const res={writeHead(code){this.code=code},end(text){assert.equal(this.code,400);assert.match(text,/learning/);resolve()}}
+    routes.get('/dsh-bili/api/settings')(req,res).catch(reject)
+  })
+  assert.equal(fs.readFileSync(process.env.BILI_WHALE_CONFIG,'utf8'),before)
+})

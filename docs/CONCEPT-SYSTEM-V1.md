@@ -134,11 +134,11 @@ node tools/bili.mjs concept personal_render --json '{"scene":"general","budget":
 
 ## 影子模式与关键版本
 
-配置默认是 `{"conceptSystem":{"observe":false,"mode":"shadow","renderBudget":400}}`。observe=true 时记录候选渲染及 personal_rendered 版本，shadow 不把这些学习素材追加进提示。active 才把渲染段附加到显式人设后；有效内容哈希包含这段文本，学习素材发生变化会重新注入，即使 persona.md 没有改。
+配置默认是 `{"conceptSystem":{"observe":false,"learning":true,"mode":"shadow","renderBudget":400}}`。observe=true 且 learning=true 时，宿主自动入队和评估新消息，并在每次模型调用前记录候选渲染及 personal_rendered 版本。shadow 更新学习状态并记录素材，不把素材交给日常模型；active 才通过 system-prompt/assemble 提供动态 context，由宿主原生上下文投影负责保留、更新和去重，覆盖直接聊天及工具续轮。pre-step 原样返回消息，不改变回合结束条件。动态素材不再写进调度器用户消息，不受人设去重影响。完整流程、重试与边界见 [宿主自动学习](AUTOMATIC-LEARNING.md)。
 
 concept_state 版本在提议、评估、决策提交和反馈更新的同一事务中记录。磁盘上的 personal.json 如存在仅作为观察来源；实际生成的 personal 段落来自 journal 状态，使用独立角色 personal_rendered，避免二者混淆。不自动覆盖用户的 persona.md、personal.json 或旧 pref 原型。
 
-当前 DS 通过 MCP 或 CLI 进行候选提取和评估；没有额外后台模型，也没有全历史自动导入。新工具要在宿主中显式连接后才可使用。视频和表达的选择仍由当前 DS 发起，程序记录建议、实际提交与覆盖，不自动触发浏览、评论、私信或词句替换。
+宿主现在使用 DSH 已有模型服务自动评估鱼会话中的新用户消息、实际模型正文及监听器收到的主人私信/评论原话；评估是有超时、无工具的独立调用，返回结果由程序校验并通过共享核心收录，不要求日常 DS 主动调用 MCP。MCP/CLI 仍可用于显式查询和操作，MCP 尚未自动注册。没有全历史导入、视频工具输出自动学习或直播混合输出学习。视频和表达的选择仍由当前 DS 发起，尚未接入选题竞争或外部动作入口约束。
 
 trace_id 由调用方从 `trace_get` 或 `observe events` 的 prepared 记录中明确传入；未知时留空，不凭时间猜测。版本、事件摘要和证据对象都能通过同一 MCP 读取；另提供下述本地观察页面；尚未提供自动文件恢复和历史 zstd 会话导入。
 
