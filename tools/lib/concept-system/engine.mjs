@@ -253,7 +253,7 @@ export class ConceptEngine {
           result = { member: m, collection_ids: ids };
           emit("candidate.reviewed", result, links(input));
         } else if (name === "decision_commit") {
-          const saved = own(d.previews ?? {}, input.preview_id);
+          const saved = d.preview(input.preview_id);
           if (!saved) throw Error("Unknown preview");
           if (saved.committed)
             throw Error("Preview already committed with another key");
@@ -301,6 +301,7 @@ export class ConceptEngine {
           };
           state.decisions[id] = result;
           saved.committed = id;
+          d.savePreview(input.preview_id, saved);
           emit("decision.committed", result, {
             ...links(preview.input),
             decision_id: id,
@@ -366,8 +367,7 @@ export class ConceptEngine {
             decision_id: decision.id,
           });
         } else throw Error("Unsupported mutating operation");
-        const object = this.store.object(state),
-          versions = (d.versions.concept_state ??= []);
+        const object = this.store.object(state);
         const version = {
           id: crypto.randomUUID(),
           role: "concept_state",
@@ -377,7 +377,7 @@ export class ConceptEngine {
           actor: "concept_system",
           at: new Date(now).toISOString(),
         };
-        versions.push(version);
+        d.addVersion(version);
         const updateLinks =
           name === "decision_commit"
             ? {
@@ -405,7 +405,7 @@ export class ConceptEngine {
     );
   }
   query(input) {
-    const s = get(this.store.read()),
+    const s = get({ state: this.store.state() }),
       members = Object.values(s.members)
         .filter(
           (m) =>
@@ -449,12 +449,11 @@ export class ConceptEngine {
         object = this.store.object(result),
         state_object = this.store.object(s),
         id = crypto.randomUUID();
-      d.previews ??= {};
-      d.previews[id] = {
+      d.savePreview(id, {
         object: object.hash,
         state_object: state_object.hash,
         committed: null,
-      };
+      });
       emit(
         "decision.previewed",
         {
@@ -470,7 +469,7 @@ export class ConceptEngine {
     });
   }
   replay(id) {
-    const p = own(this.store.read().previews ?? {}, id);
+    const p = this.store.preview(id);
     if (!p) throw Error("Unknown preview");
     const original = this.store.getObject(p.object).content,
       s = this.store.getObject(p.state_object).content;
@@ -478,7 +477,7 @@ export class ConceptEngine {
     return { matches: stable(result) === stable(original), result };
   }
   async render({ subject, scene, budget }) {
-    const s = get(this.store.read()),
+    const s = get({ state: this.store.state() }),
       ranked = Object.values(s.collections)
         .filter(
           (c) =>

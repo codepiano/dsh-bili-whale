@@ -6,6 +6,7 @@
 
 ```bash
 node tools/bili.mjs observe status
+node tools/bili.mjs observe integrity
 node tools/bili.mjs observe capture
 node tools/bili.mjs observe events '{"type":"prompt.prepared","limit":20}'
 node tools/bili.mjs observe versions persona
@@ -21,7 +22,19 @@ node tools/bili.mjs observe object <内容哈希>
 
 宿主保存的 assistant/message 及其中实际返回的 reasoning 内容会作为脱敏证据对象保存；可用的 request/header 和模型来源也保留在宿主事件中。没有事件接口或没有 reasoning 内容时，保留不可用标记，不能把简短决策理由冒充原始推理。显式导入响应也可以用 `observe response <JSON文件>`，必须提供能对应到 prepared 提示的 trace_id 与 session_id，并声明 reasoning_kind。
 
-存储使用私有目录和内容哈希对象；单个原子替换的 `journal.json` 保存事件、版本清单与状态，同一跨进程锁串行化 CLI、MCP 和宿主写入。事务中断只可能留下尚未引用的内容对象，不会留下已更新学习状态却没有事件的部分提交。日志损坏时拒绝更新，不重建空白状态。首版面向本地低频使用，尚未分段压缩，事件量大时需要后续增加索引和归档。
+存储使用 SQLite 数据库 `observations.sqlite3` 和独立的 `objects/` 内容哈希快照。数据库启用 WAL、FULL 同步和写锁等待；事件、版本索引、幂等回执、预演、学习元数据及各类概念实体分别建表，学习实体按类型和 ID 单独存行。一次学习提交的状态变化与事件在同一事务中提交或回滚，不再用回环端口作为存储锁。
+
+事件查询按 trace、决策、会话、类型和时间建立索引，支持序号分页。事件追加与文件版本记录不加载学习图；学习事务仍读取当前学习状态进行计算与版本检查，但只更新变化的实体行，不重写全部历史事件。`read()` 保留完整导出兼容接口，日常查询不经过它。快照仍按内容哈希独立保存，事务失败可能留下未引用的快照，不会产生部分提交的学习状态。
+
+概念存储使用内置 `node:sqlite`，需要无需实验开关即可加载该模块的 Node 22.13+。观察关闭时普通插件功能不加载此模块，保留原有运行时兼容性；启用观察和运行概念 MCP 时，宿主与 CLI 均须支持 SQLite。本机已分别在 Node 26 与 DSH 内置 Node 24 验证，不增加原生扩展编译依赖。
+
+### 从旧日志迁移
+
+首次打开尚未初始化的数据库时，如同目录存在 `journal.json`，会校验结构、事件序号及版本和预演引用的快照，再在同一 SQLite 事务中导入事件、版本、幂等回执、预演与学习状态。导入来源哈希记录在 metadata 表中；成功后只使用数据库，不反复导入旧文件。原 JSON 和快照文件原样保留，不自动删除或改写。
+
+迁移失败会回滚建表与导入，原文件保留；数据库损坏、应用标识不符或不支持的 schema 版本会拒绝操作，不静默清空重建。迁移应在旧 JSON 写入进程停止后进行，避免旧程序继续写入已经停用的日志。本次开发只迁移临时测试数据，不打开或迁移真实用户目录。
+
+`observe status` 显示数据库位置、事件数和迁移信息；`observe integrity` 执行 SQLite quick_check。WAL 模式下可能存在 `observations.sqlite3-wal`、`observations.sqlite3-shm`，不要在运行中手动删除。备份应包含数据库与 objects 快照，并在所有写入进程停止后复制；不要只复制运行中的主数据库文件。
 
 关键文件检查覆盖删除和再次出现；一个轮询周期内发生且恢复原状的短暂编辑可能无法观测。人设、聊天、日记、原始推理均不进入项目 Git，默认也不向外上传。
 

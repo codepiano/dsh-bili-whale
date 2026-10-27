@@ -8,6 +8,10 @@ whale-wake
 whale-log.jsonl
 bili-whale.config.json
 state.json
+observations.sqlite3
+observations.sqlite3-wal
+observations.sqlite3-shm
+observations.sqlite3-journal
 
 # ── 她的日子（私人内容）────────────────────────────────────
 whale-diary*.md
