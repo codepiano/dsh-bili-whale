@@ -31,8 +31,12 @@ export async function nextExploration(store,{cycle_id},{signal,feed=runFeed,read
     return nextExploration(store,{cycle_id},{signal,feed,readConfig})
   }
   const slate=await feed(args,{signal})
-  const envelope={cycle_id,run_id,round:cycle.round,max_rounds:cycle.max_rounds}
-  if(slate.status==='search_plan_required'||slate.status==='judgment_required')return {...envelope,status:slate.status,next_action:slate.status==='search_plan_required'?'feed_search_plan':'feed_assess',packet:slate}
+  const envelope={cycle_id,run_id,round:cycle.round,max_rounds:cycle.max_rounds,feed_arguments:args,continue_with:{tool:'exploration_next',arguments:{cycle_id}}}
+  if(slate.status==='search_plan_required'||slate.status==='judgment_required') {
+    const next_action=slate.status==='search_plan_required'?'feed_search_plan':'feed_assess'
+    const instructions=`只调用 ${next_action}，run_id=${run_id}；完成后调用 exploration_next({cycle_id:"${cycle_id}"})。不要直接调用 feed_run、猜测参数或排查源码；该 cycle 的全部检索参数由状态机保管。`
+    return {...envelope,status:slate.status,next_action,packet:{...slate,instructions},instructions}
+  }
   const rows=store.journal.use(db=>db.prepare("SELECT payload FROM video_reads WHERE json_extract(payload,'$.feed.run_id')=? ORDER BY rowid DESC").all(run_id).map(r=>JSON.parse(r.payload)))
   for(const video of slate.selected??[]) {
     const read=rows.find(r=>r.bvid===video.bv)

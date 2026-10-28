@@ -575,6 +575,8 @@ test('automatic cycle advances a stale search instead of asking the model to rer
  const {nextExploration}=await import('../tools/lib/concept-system/auto-exploration.mjs'),{store,engine}=await fixture(t)
  const options={readConfig:()=>config,feed:async arg=>new FeedConcepts({store,config,runId:arg.run_id,seed:arg.seed}).plan(['科学'])}
  const first=await nextExploration(store,{cycle_id:'conflict'},options);assert.equal(first.round,1)
+ assert.deepEqual(first.continue_with,{tool:'exploration_next',arguments:{cycle_id:'conflict'}});assert.equal(first.feed_arguments.n,5);assert.equal(first.feed_arguments.pool,30)
+ assert.match(first.packet.instructions,/不要直接调用 feed_run/);assert.match(first.packet.instructions,/exploration_next/)
  await engine.call('concept_propose',{key:'other-work',source:{id:'other-work',actor:'fish',type:'manual',excerpt:'刚收到另一个真实材料线索'},subject:'fish',content:'新的材料线索',tags:['topic']})
  const next=await nextExploration(store,{cycle_id:'conflict'},options);assert.equal(next.round,2);assert.equal(next.next_action,'feed_search_plan')
  assert.equal(store.events({type:'exploration.cycle_continued'}).at(-1).data.reason,'concept_state_changed_before_selection')
