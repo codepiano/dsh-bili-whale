@@ -1,6 +1,7 @@
 import crypto from 'node:crypto'
 import { ObservationStore, hash, redact } from './store.mjs'
 import { scoreDecision, commitScoredDecision } from './engine.mjs'
+import { VideoReads } from './video-reads.mjs'
 
 const scene='feed'
 const normalized=s=>String(s??'').normalize('NFKC').toLowerCase().trim()
@@ -112,6 +113,7 @@ export class FeedConcepts {
       return {...selected,search:receipt('feed-plan:'+this.runId)}
     })
   }
+  readBvids() {return this.enabled?new VideoReads(this.store).seen():[]}
   async plan(legacyKeywords) {
     if(!this.enabled)return {keywords:legacyKeywords,proposed:[],mode:'disabled'}
     legacyKeywords=redact(legacyKeywords)

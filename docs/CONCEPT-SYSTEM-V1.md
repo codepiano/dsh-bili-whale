@@ -138,7 +138,7 @@ node tools/bili.mjs concept personal_render --json '{"scene":"general","budget":
 
 concept_state 版本在提议、评估、决策提交和反馈更新的同一事务中记录。磁盘上的 personal.json 如存在仅作为观察来源；实际生成的 personal 段落来自 journal 状态，使用独立角色 personal_rendered，避免二者混淆。不自动覆盖用户的 persona.md、personal.json 或旧 pref 原型。
 
-宿主现在使用 DSH 已有模型服务自动评估鱼会话中的新用户消息、实际模型正文及监听器收到的主人私信/评论原话；评估是有超时、无工具的独立调用，返回结果由程序校验并通过共享核心收录，不要求日常 DS 主动调用 MCP。MCP/CLI 仍可用于显式查询和操作，MCP 尚未自动注册。feed 已接入概念兴趣竞争：active 影响搜索词与实际阅读清单，提交后更新选题疲劳；shadow 保留旧输出，只记录预演。细节见 [feed 接入](FEED-INTEREST-COMPETITION.md)。仍没有全历史导入、视频工具输出自动学习、直播混合输出学习、自动词句替换或外部动作入口约束。
+宿主现在使用 DSH 已有模型服务自动评估鱼会话中的新用户消息、实际模型正文及监听器收到的主人私信/评论原话；评估是有超时、无工具的独立调用，返回结果由程序校验并通过共享核心收录，不要求日常 DS 主动调用 MCP。debrief 已通过可验证回执接回字幕/简介来源，分别记录材料取得、会话引用和概念评估完成，见 [视频读取闭环](DEBRIEF-LEARNING-LOOP.md)。MCP/CLI 仍可用于显式查询和操作，MCP 尚未自动注册。feed 已接入概念兴趣竞争：active 影响搜索词与实际阅读清单，提交后更新选题疲劳；shadow 保留旧输出，只记录预演。细节见 [feed 接入](FEED-INTEREST-COMPETITION.md)。仍没有全历史导入、无字幕画面自动语义学习、直播混合输出学习、自动词句替换或外部动作入口约束。
 
 trace_id 由调用方从 `trace_get` 或 `observe events` 的 prepared 记录中明确传入；未知时留空，不凭时间猜测。版本、事件摘要和证据对象都能通过同一 MCP 读取；另提供下述本地观察页面；尚未提供自动文件恢复和历史 zstd 会话导入。
 

@@ -7,6 +7,7 @@ import {spawnSync} from 'node:child_process'
 import {fileURLToPath,pathToFileURL} from 'node:url'
 import {ObservationStore,hash} from '../tools/lib/concept-system/store.mjs'
 import {ConceptEngine} from '../tools/lib/concept-system/engine.mjs'
+import {VideoReads} from '../tools/lib/concept-system/video-reads.mjs'
 import {FeedConcepts,feedGroups,interestPlan,videoContributions} from '../tools/lib/concept-system/feed.mjs'
 
 function box(t){const d=fs.mkdtempSync(path.join(os.tmpdir(),'whale-feed-'));t.after(()=>fs.rmSync(d,{recursive:true,force:true}));return d}
@@ -180,13 +181,16 @@ test('real feed CLI uses concept search and ranking while preserving all existin
   const poolFile=path.join(home,'pool.json'),requests=path.join(home,'requests.jsonl')
   fs.writeFileSync(poolFile,JSON.stringify(pool))
   const store=new ObservationStore(conceptDir);await topic(new ConceptEngine(store),'猫')
+  const reads=new VideoReads(store),attempt=await reads.start('BV0000000001')
+  const receipt=await reads.complete(attempt.id,{bvid:'BV0000000001',cid:'123',duration:300,subtitles:[{from:0,to:4,content:'猫的生活'}]})
+  await reads.acceptOutput(receipt.marker,{session_id:'fish',route:{provider:'fixture',model:'fixture'}})
   const env={...process.env,HOME:home,USERPROFILE:home,DSH_HOME:dsh,BILI_WHALE_CONFIG:path.join(dsh,'bili-whale.config.json'),BILI_CONCEPT_HOME:conceptDir,TEST_FEED_POOL:poolFile,TEST_REQUESTS:requests,NODE_OPTIONS:'--import='+pathToFileURL(fileURLToPath(new URL('./helpers/feed-fetch.mjs',import.meta.url))).href}
   const run=()=>spawnSync(process.execPath,[fileURLToPath(new URL('../tools/commands/feed.mjs',import.meta.url)),'--source','search','--n','2','--json','--run-id','cli','--seed','fixed'],{env,encoding:'utf8',timeout:15000})
   const r=run();assert.ifError(r.error);assert.equal(r.status,0,r.stderr)
   const result=JSON.parse(r.stdout)
   assert.ok(result.search.keywords.includes('猫'))
   assert.equal(result.selected.length,2)
-  for(const x of result.selected)assert.ok(['BV0000000001','BV0000000007','BV0000000008'].includes(x.bv),JSON.stringify(x))
+  for(const x of result.selected)assert.ok(['BV0000000007','BV0000000008'].includes(x.bv),JSON.stringify(x))
   assert.ok(fs.readFileSync(requests,'utf8').includes('keyword=%E7%8C%AB'))
   assert.ok(fs.readFileSync(requests,'utf8').split('\n').filter(Boolean).every(l=>JSON.parse(l).method==='GET'))
   const before=hash(store.state()),requestsBefore=fs.readFileSync(requests,'utf8')

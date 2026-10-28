@@ -55,6 +55,7 @@ const audit = path.join(HOME, '.bili-ai', 'commented-videos.md')
 let prefs = [...(config().preferences?.like ?? [])]   // 偏好来自统一配置（首选）
 let dislike = [...(config().preferences?.dislike ?? [])]
 let seen = new Set()
+for(const bv of concepts.readBvids())seen.add(bv)
 try {
   const text = fs.readFileSync(diary, 'utf8')
   const m = text.match(/^-\s*\*\*爱看\*\*：(.+)$/m)

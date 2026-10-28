@@ -19,6 +19,14 @@ const source = z
     excerpt: text,
     ref: z.string().max(2000).optional(),
     occurred_at: z.string().datetime().optional(),
+    video: z.object({
+      bvid:z.string().regex(/^BV[0-9A-Za-z]{10}$/),
+      cid:z.string().regex(/^\d+$/),
+      section:z.enum(['subtitles','description']),
+      part:z.number().int().min(1).max(24),
+      parts:z.number().int().min(1).max(24),
+      content_hash:z.string().regex(/^[a-f0-9]{64}$/),
+    }).strict().optional(),
   })
   .strict();
 export const schemas = {

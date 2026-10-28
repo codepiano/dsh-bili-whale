@@ -44,4 +44,6 @@ node tools/bili.mjs feed --n 5 --per 2 --seed nightly-example --run-id nightly-e
 
 清单的含义是“决定接下来读这些候选”，不是“实际看过/看完”。它不会写入已看记录、改动日记或增加正面奖励。夜间提示已要求按 feed 的顺序开始浅读；模型在后续深读阶段仍可能选择不同视频，本阶段没有把 debrief 做成强制执行门禁或观看回执。
 
+后续的 [debrief 学习闭环](DEBRIEF-LEARNING-LOOP.md) 已补上独立的材料读取记录：字幕材料已取得且由鱼会话引用后，新的 feed 会排除对应 BV；失败、简介-only 和未接收的回执不冒充正文已读。显式传入 feed-run-id 的 debrief 会校验原清单并关联决策，但没有强制所有手工 debrief 都必须来自某轮 feed。
+
 验证使用临时数据库、模拟视频与拦截所有请求的 CLI 子进程，不访问真实 B 站或在线学习数据。

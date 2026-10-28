@@ -44,6 +44,16 @@ CREATE TABLE IF NOT EXISTS learning_jobs(
 ) STRICT;
 CREATE INDEX IF NOT EXISTS learning_jobs_ready ON learning_jobs(status,available_at);
 CREATE INDEX IF NOT EXISTS learning_jobs_session ON learning_jobs(session_id,status);
+CREATE TABLE IF NOT EXISTS video_reads(
+ id TEXT PRIMARY KEY, bvid TEXT NOT NULL, kind TEXT NOT NULL, status TEXT NOT NULL,
+ payload TEXT NOT NULL CHECK(json_valid(payload))
+) STRICT;
+CREATE INDEX IF NOT EXISTS video_reads_seen ON video_reads(kind,status,bvid);
+CREATE INDEX IF NOT EXISTS video_reads_session ON video_reads(json_extract(payload,'$.session_id'),status);
+CREATE TABLE IF NOT EXISTS video_read_jobs(
+ read_id TEXT NOT NULL, job_id TEXT NOT NULL, PRIMARY KEY(read_id,job_id)
+) STRICT;
+CREATE INDEX IF NOT EXISTS video_read_jobs_job ON video_read_jobs(job_id);
 `;
 function plain(x) {
   return x !== null && typeof x === "object" && !Array.isArray(x);
@@ -417,6 +427,22 @@ export class SqliteJournal {
         const state = loadState ? readState(db) : undefined,
           before = loadState ? flatten(state) : null;
         const d = {
+          receipt: key => {
+            const r=db.prepare("SELECT result FROM receipts WHERE key=?").get(key);
+            return r?JSON.parse(r.result).value:null;
+          },
+          reads: {
+            get: id => {
+              const r=db.prepare("SELECT payload FROM video_reads WHERE id=?").get(id);
+              return r?JSON.parse(r.payload):null;
+            },
+            put: r => db.prepare("INSERT INTO video_reads VALUES(?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET kind=excluded.kind,status=excluded.status,payload=excluded.payload")
+              .run(r.id,r.bvid,r.kind,r.status,json(redact(r))),
+            bindJob: (readId,jobId) => db.prepare("INSERT OR IGNORE INTO video_read_jobs VALUES(?,?)").run(readId,jobId),
+            jobs: readId => db.prepare("SELECT j.payload FROM learning_jobs j JOIN video_read_jobs v ON v.job_id=j.id WHERE v.read_id=? ORDER BY j.id").all(readId).map(r=>JSON.parse(r.payload)),
+            forJob: jobId => db.prepare("SELECT r.payload FROM video_reads r JOIN video_read_jobs v ON v.read_id=r.id WHERE v.job_id=?").all(jobId).map(r=>JSON.parse(r.payload)),
+            awaiting: sessionId => db.prepare("SELECT payload FROM video_reads WHERE status='presented' AND json_extract(payload,'$.session_id')=? AND json_extract(payload,'$.learning_queued') IS NOT 1 AND kind!='none' LIMIT 24").all(sessionId).map(r=>JSON.parse(r.payload)),
+          },
           jobs: {
             get: (id) => {
               const row = db.prepare("SELECT payload FROM learning_jobs WHERE id=?").get(id);
