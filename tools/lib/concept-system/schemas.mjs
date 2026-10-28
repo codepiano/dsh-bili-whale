@@ -21,7 +21,80 @@ const source = z
     occurred_at: z.string().datetime().optional(),
   })
   .strict();
+export const explorationRatios = z
+  .object({
+    deep: unit,
+    revisit: unit,
+    discover: unit,
+  })
+  .strict()
+  .refine(
+    (v) => Math.abs(v.deep + v.revisit + v.discover - 1) < 1e-9,
+    "Exploration ratios must sum to 1",
+  );
+const subject = z.enum(["user", "fish"]);
+const explorationPath = z.enum(["deep", "revisit", "discover"]);
+const target = z
+  .object({
+    collection_id: id.optional(),
+    question_id: id.optional(),
+    candidate_id: id.optional(),
+  })
+  .strict();
 export const schemas = {
+  exploration_configure: z
+    .object({
+      key,
+      ...links,
+      ratios: explorationRatios,
+      history_window: z.number().int().min(10).max(500).default(40),
+      reason: text,
+    })
+    .strict(),
+  exploration_plan: z
+    .object({
+      subject: subject.default("fish"),
+      scene: id.default("watch"),
+      seed: key,
+      limit: z.number().int().min(1).max(50).default(10),
+    })
+    .strict(),
+  exploration_query: z
+    .object({
+      subject: subject.default("fish"),
+      scene: id.default("watch"),
+      limit: z.number().int().min(1).max(100).default(30),
+    })
+    .strict(),
+  exploration_question: z
+    .object({
+      key,
+      ...links,
+      question_id: id.optional(),
+      subject: subject.default("fish"),
+      scene: id.default("watch"),
+      collection_id: id,
+      question: text,
+      status: z.enum(["active", "paused", "resolved"]).default("active"),
+      next_step: text,
+      reason: text,
+      source_ids: z.array(id).max(20).default([]),
+    })
+    .strict(),
+  exploration_progress: z
+    .object({
+      key,
+      ...links,
+      decision_id: id,
+      outcome: z.enum(["engaged", "completed", "skipped", "failed"]),
+      source_ids: z.array(id).max(20).default([]),
+      answered: z.string().trim().max(12000).default(""),
+      remaining: z.string().trim().max(12000).default(""),
+      next_step: z.string().trim().max(12000).default(""),
+      question_status: z.enum(["active", "paused", "resolved"]).optional(),
+      reason: text,
+    })
+    .strict(),
   concept_propose: z
     .object({
       key,
@@ -87,6 +160,15 @@ export const schemas = {
     .object({
       ...links,
       question: text,
+      exploration: z
+        .object({
+          path: explorationPath,
+          seed: key,
+          state_version: key,
+          reason: text,
+        })
+        .strict()
+        .optional(),
       scene: id,
       subject: z.enum(["user", "fish"]).default("fish"),
       parent_decision_id: id.optional(),
@@ -97,6 +179,7 @@ export const schemas = {
             .object({
               label: z.string().trim().min(1).max(200),
               eligible: z.boolean().default(true),
+              target: target.optional(),
               reason: text,
               contributions: z
                 .array(

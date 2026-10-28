@@ -7,12 +7,21 @@ import { redact } from "./lib/concept-system/store.mjs";
 const engine = new ConceptEngine(),
   server = new McpServer({ name: "bili-whale-concepts", version: "0.1.0" });
 const descriptions = {
+  exploration_configure:
+    "配置深挖、稀疏群回访、新词发现比例（总和为 1）和实际曝光窗口；记录理由与版本。",
+  exploration_plan:
+    "先规划探索路径：按实际曝光欠额及种子选择，返回问题、稀疏集合和新词检索线索；不计曝光。检索并记录新证据后重新规划。",
+  exploration_query: "查询探索配置、问题进展、路径选择与实际曝光记录。",
+  exploration_question:
+    "建立或更新带集合来源的问题线，记录下一步、状态与理由。",
+  exploration_progress:
+    "选择后记录实际阅读/观看证据、回答、剩余问题及下一步；只有 engaged/completed 计曝光，不自动奖励。",
   concept_propose:
     "记录携带来源的待评估概念。明确 subject=user 或 fish，提及不等于喜欢。",
   concept_review: "评估候选并关联集合，保留成员和原始证据；不直接改变人设。",
   concept_query: "按主体、场景、用途、状态检索成员和集合。",
   decision_preview:
-    "影子决策预演：记录分项分数、疲劳、扰动种子和状态快照；不更新学习状态。",
+    "影子决策预演：记录分项分数、疲劳、扰动种子和状态快照；不更新学习状态。探索决策需携带 exploration_plan 的版本、种子、路径以及各选项 target。",
   decision_commit:
     "按幂等键固化一次选择与覆盖理由，只更新本地疲劳；不发送任何外部消息。",
   decision_feedback:
@@ -29,6 +38,8 @@ const descriptions = {
     "显式归档已返回的 DS 正文和可用推理；必须指向已准备提示，不伪造推理。",
 };
 const readonly = new Set([
+  "exploration_plan",
+  "exploration_query",
   "concept_query",
   "trace_get",
   "version_list",
