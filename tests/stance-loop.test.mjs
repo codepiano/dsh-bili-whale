@@ -566,7 +566,7 @@ test('automatic exploration bounds empty rounds, preserves exhaustion, and disab
  const before=hash(store.state());assert.equal((await nextExploration(store,{cycle_id:'off'},{...options,readConfig:()=>({conceptSystem:{observe:false}})})).status,'disabled');assert.equal(hash(store.state()),before)
  await store.transaction({key:'feed-select:stale-r1',input:'selected'},()=>({mode:'shadow',selected:[videos[0]]}))
  const reads=new VideoReads(store),stale=await reads.start(videos[0].bv,{feed_run_id:'stale-r1'})
- await store.transaction({state:false},d=>{const r=d.reads.get(stale.id);d.reads.put({...r,started_at:new Date(Date.now()-220000).toISOString()})})
+ await store.transaction({state:false},d=>{const r=d.reads.get(stale.id);d.reads.put({...r,started_at:new Date(Date.now()-1860001).toISOString()})})
  const continued=await nextExploration(store,{cycle_id:'stale'},{...options,feed:async()=>({status:'selected',selected:[videos[0]]})})
  assert.equal(continued.round,2);assert.equal(continued.next_action,'debrief_read');assert.equal((await reads.get(stale.id)).status,'failed')
 })
@@ -657,3 +657,39 @@ test('automatic continuation retains the relevance and signed selection rubric i
   assert.equal(out.next_action,'feed_assess');
   assert.match(out.packet.instructions,/建议跳过为负/);
 });
+
+
+test('audio transcripts use full-page delivery gates and retain model/audio provenance through learning and progress',async t=>{
+ const {store,engine,feed,args}=await fixture(t),pending=await feed.select(args)
+ await engine.call('feed_assess',{key:'judge-audio',run_id:'run',assessments:assessments(pending)})
+ const selected=await feed.resume({n:1,per:2}),decision=selected.decisions[0],reads=new VideoReads(store)
+ const started=await reads.start(decision.selected,{feed_run_id:'run'})
+ const provenance={engine:'whisper.cpp',model:'ggml-fixture.bin',model_hash:'a'.repeat(64),audio_hash:'b'.repeat(64),chunk_seconds:240}
+ const packet={bvid:decision.selected,cid:'123',duration:100,transcript:{rows:[{from:0,to:10,content:'检验证据并比较解释。'}],provenance}}
+ const acquired=await reads.complete(started.id,packet)
+ await reads.acceptOutput(acquired.marker,{session_id:'fish',route:{provider:'deepseek-account',model:'fixture'}})
+ assert.equal(store.events({type:'learning.enqueued'}).length,0)
+ const page=await reads.page({read_id:acquired.id,page:1});assert.equal(page.type,'bili.video_text_page.v1')
+ await reads.acceptOutput(JSON.stringify({...page,text:'假转写'}),{session_id:'fish',host_seq:7})
+ assert.deepEqual((await reads.get(acquired.id)).pages_presented,undefined)
+ await reads.acceptOutput(JSON.stringify(page),{session_id:'fish',host_seq:8})
+ assert.equal(store.events({type:'exploration.exposed'}).length,0)
+ await reads.acceptDelivery({session_id:'fish',through_seq:8,host_seq:9})
+ assert.equal(store.events({type:'video.transcript_read_completed'}).length,1)
+ assert.equal(store.events({type:'video.subtitle_read_completed'}).length,0)
+ assert.deepEqual(reads.seen(),[decision.selected])
+ const exposure=store.state().concepts.decisions[decision.id].exploration.exposure
+ assert.equal(exposure.scope,'transcript_pages_presented_not_watch_completion')
+ const source=store.state().concepts.sources[exposure.source_ids[0]]
+ assert.equal(source.video.section,'audio_transcript');assert.deepEqual(source.video.transcription,provenance)
+ await engine.call('exploration_progress',{key:'audio-progress',decision_id:decision.id,outcome:'engaged',source_ids:exposure.source_ids,answered:'转写提出检验证据并比较解释',remaining:'实际验证结果如何？',next_step:'找独立复核',reason:'引用实际交付的转写'})
+ const another=await reads.start(decision.selected,{feed_run_id:'run'})
+ const changed=await reads.complete(another.id,{...packet,transcript:{...packet.transcript,provenance:{...provenance,model_hash:'c'.repeat(64)}}})
+ assert.notEqual((await reads.get(changed.id)).sources[0].id,(await reads.get(acquired.id)).sources[0].id)
+ await reads.acceptOutput(changed.marker,{session_id:'fish'})
+ await reads.acceptOutput(JSON.stringify(await reads.page({read_id:changed.id,page:1})),{session_id:'fish'})
+ assert.equal(store.events({type:'exploration.exposed'}).length,1,'supplementing a read must not inflate exposure')
+ assert.equal(store.events({type:'video.text_supplement_read'}).length,1)
+ const combined=store.state().concepts.decisions[decision.id].exploration.exposure
+ assert.equal(combined.source_ids.length,2);assert.equal(combined.supplements[0].read_id,changed.id)
+})

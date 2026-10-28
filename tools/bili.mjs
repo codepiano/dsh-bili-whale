@@ -24,7 +24,7 @@ const map = {
   video: ['commands/video-content.mjs', '不点开视频也能还原它讲什么（读文字：简介/字幕/弹幕/评论）'],
   subtitles: ['commands/subtitles.mjs', '拉官方字幕全文（WBI 签名，带时间戳）：<BV> [--lan ai-zh] [--print N] —— 看视频最省的一条腿'],
   'watch-video': ['commands/bili-watch.mjs', '真"看"视频：取直链 → 下载 → ffmpeg 抽帧拼九宫格 → 交给 read_image：<BV> [3x3|4x4] [--uniform]'],
-  debrief: ['commands/debrief.mjs', '视频材料读取：封面+简介+字幕+弹幕+热评+抽帧；观察启用时回流学习：<BV> [--no-frames] [--feed-run-id 本轮ID]'],
+  debrief: ['commands/debrief.mjs', '字幕优先读取；缺字幕本地音频转写，素材按需补充：<BV> [--audio auto|never|always] [--context] [--frames] [--feed-run-id 本轮ID]'],
   'ai-share': ['commands/ai-share.mjs', '分享前评论抽样与模型评估：sample <BV> [--more] / record <BV> <结果.json>'],
   comments: ['commands/comments.mjs', '热评 / 最新评论（只读，匿名可读）：<BV> [--ps 20] [--pn 1] [--sort hot|time] [--json] —— 日报挑片只要"标题+热评"时用它，比 debrief 轻'],
   feed: ['commands/feed.mjs', '选题器（平台只读，active 更新本地疲劳）：概念兴趣竞争、排除已看/已评论：[--n 6] [--per 2] [--seed 文本] [--run-id 本轮ID] [--json]'],

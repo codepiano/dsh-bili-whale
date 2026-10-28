@@ -3,34 +3,38 @@ import { ObservationStore,hash,redact } from './store.mjs'
 import { enqueueLearningSource } from './learning.mjs'
 import { settleVideoRead } from './video-state.mjs'
 
+export const isVideoTextKind=kind=>kind==='subtitles'||kind==='audio_transcript'
 const MAX_TEXT=192000,CHUNK=8000
 export function normalizeSubtitles(rows) {
   return (Array.isArray(rows)?rows:[]).slice(0,50000).filter(l=>l&&Number.isFinite(l.from)&&l.from>=0&&typeof l.content==='string'&&l.content.trim())
     .map(l=>({from:l.from,to:Number.isFinite(l.to)&&l.to>=l.from?l.to:l.from,content:l.content.slice(0,4000)}))
 }
-export function videoMaterial({bvid,cid,title='',description='',duration=0,subtitles=[],track=null,components={},artifacts={}}) {
+export function videoMaterial({bvid,cid,title='',description='',duration=0,subtitles=[],track=null,transcript=null,components={},artifacts={}}) {
   if(!/^BV[0-9A-Za-z]{10}$/.test(bvid)||!/^\d+$/.test(String(cid))||Number(cid)<=0||!Number.isFinite(duration)||duration<0)throw Error('Invalid video material identity/duration')
-  const normalizedLoss=(Array.isArray(subtitles)&&subtitles.length>50000)||(Array.isArray(subtitles)&&subtitles.some(l=>typeof l?.content==='string'&&l.content.length>4000))||components.subtitle_input?.truncated===true
-  const rows=normalizeSubtitles(subtitles)
+  const subtitleRows=normalizeSubtitles(subtitles)
+  const useAudio=!!transcript&&(transcript.force===true||!subtitleRows.length)
+  const rawRows=useAudio?transcript.rows:subtitles
+  const normalizedLoss=(Array.isArray(rawRows)&&rawRows.length>50000)||(Array.isArray(rawRows)&&rawRows.some(l=>typeof l?.content==='string'&&l.content.length>4000))||(!useAudio&&components.subtitle_input?.truncated===true)
+  const rows=useAudio?normalizeSubtitles(transcript.rows):subtitleRows
   const text=rows.length?rows.map(l=>`[${l.from}-${l.to}] ${l.content}`).join('\n'):String(description).trim()
-  const kind=rows.length?'subtitles':text?'description':'none'
+  const kind=rows.length?(useAudio?'audio_transcript':'subtitles'):text?'description':'none'
   const excerpt=redact(text).slice(0,MAX_TEXT),parts=[]
   for(let start=0;start<excerpt.length&&parts.length<24;) {
     let end=Math.min(start+CHUNK,excerpt.length)
     if(end<excerpt.length&&/[\uD800-\uDBFF]/.test(excerpt[end-1]))end--
     const part=excerpt.slice(start,end);if(part.trim())parts.push(part);start=end
   }
-  const content_hash=hash(excerpt)
+  const content_hash=hash(kind==='audio_transcript'?{text:excerpt,transcription:transcript.provenance}:excerpt)
   const sources=parts.map((part,i)=>({
     id:'video-'+hash([bvid,String(cid),kind,content_hash,i]).slice(0,32),actor:'third_party',type:'video',
     excerpt:part,ref:`bili:${bvid}`,
-    video:{bvid,cid:String(cid),section:kind,part:i+1,parts:parts.length,content_hash},
+    video:{bvid,cid:String(cid),section:kind,part:i+1,parts:parts.length,content_hash,...(kind==='audio_transcript'?{transcription:transcript.provenance}:{})},
   }))
   return redact({bvid,cid:String(cid),title:String(title).slice(0,1000),description:String(description).slice(0,20000),duration,
-    kind,track,components,artifacts,content_hash,text:excerpt,sources,
-    coverage:{subtitle_lines:rows.length,from:rows[0]?.from??null,to:rows.at(-1)?.to??null,
-      original_chars:text.length,retained_chars:parts.reduce((n,s)=>n+s.length,0),truncated:normalizedLoss||text.length>excerpt.length||parts.join('')!==excerpt,
-      scope:kind==='subtitles'?'subtitle_material_not_watch_completion':kind==='description'?'description_only':'no_text'},
+    kind,track:kind==='audio_transcript'?null:track,transcription:kind==='audio_transcript'?transcript.provenance:null,components,artifacts,content_hash,text:excerpt,sources,
+    coverage:{subtitle_lines:useAudio?0:rows.length,transcript_segments:useAudio?rows.length:0,from:rows[0]?.from??null,to:rows.at(-1)?.to??null,
+      original_chars:text.length,retained_chars:parts.reduce((n,s)=>n+s.length,0),truncated:normalizedLoss||transcript?.truncated===true||text.length>excerpt.length||parts.join('')!==excerpt,
+      scope:kind==='audio_transcript'?'audio_transcription_not_watch_completion':kind==='subtitles'?'subtitle_material_not_watch_completion':kind==='description'?'description_only':'no_text'},
   })
 }
 
@@ -81,7 +85,7 @@ export class VideoReads {
   }
   async acceptOutput(text,{session_id,trace_id=null,route=null,learn=true,host_seq=null,tool_call_id=null}) {
     let pagePayload;try{pagePayload=JSON.parse(String(text))}catch{}
-    if(pagePayload?.type==='bili.subtitle_page.v1')return this.acceptPage(pagePayload,{session_id,trace_id,route,learn,host_seq,tool_call_id})
+    if(['bili.subtitle_page.v1','bili.video_text_page.v1'].includes(pagePayload?.type))return this.acceptPage(pagePayload,{session_id,trace_id,route,learn,host_seq,tool_call_id})
     const tokens=[...String(text).matchAll(/BILI_DEBRIEF_RECEIPT:([a-f0-9-]{36}):([a-f0-9]{64})/g)].slice(0,24)
     if(!tokens.length)return []
     return this.store.transaction({},(d,emit)=>{
@@ -96,9 +100,9 @@ export class VideoReads {
         // Validate object integrity before admitting any source. No caller can
         // supply text, arbitrary object paths or model routes in the marker.
         this.store.getObject(read.material.hash)
-        const queueNow=learn&&!(read.read_policy&&read.kind==='subtitles')
+        const queueNow=learn&&!(read.read_policy&&isVideoTextKind(read.kind))
         if(queueNow)this.queueSources(d,emit,read,{session_id,trace_id,route})
-        const next={...read,status:'presented',session_id,trace_id,learning_queued:queueNow,requires_delivery:!!read.read_policy&&read.kind==='subtitles'&&String(route?.provider??'').startsWith('deepseek'),presented_at:new Date(this.store.now()).toISOString()}
+        const next={...read,status:'presented',session_id,trace_id,learning_queued:queueNow,requires_delivery:!!read.read_policy&&isVideoTextKind(read.kind)&&String(route?.provider??'').startsWith('deepseek'),presented_at:new Date(this.store.now()).toISOString()}
         d.reads.put(next)
         emit('video.material_presented',{read_id:id,bvid:read.bvid,kind:read.kind,parts:read.sources.length,material:read.material,scope:'tool_result_receipt_not_watch_completion'},{session_id,trace_id,decision_id:read.feed?.decision_id??null})
         if(!next.read_policy)this.expose(d,emit,next,session_id)
@@ -113,9 +117,10 @@ export class VideoReads {
           : null;
         if (
           decision?.exploration &&
-          !decision.exploration.exposure &&
-          next.kind === "subtitles"
+          isVideoTextKind(next.kind)
         ) {
+          const previous=decision.exploration.exposure
+          if(previous&&(previous.read_id===next.id||previous.supplements?.some(s=>s.read_id===next.id)))return
           for (const spec of next.sources) {
             const source = this.store.getObject(spec.object.hash).content;
             if (!d.state.concepts.sources[source.id]) {
@@ -131,12 +136,12 @@ export class VideoReads {
               );
             }
           }
-          const exposure = {
+          const exposure = previous?{...previous,source_ids:[...new Set([...previous.source_ids,...next.sources.map(s=>s.id)])],supplements:[...(previous.supplements??[]),{read_id:next.id,kind:next.kind,material_hash:next.material.hash,source_ids:next.sources.map(s=>s.id),at:this.store.now()}]}:{
             read_id: next.id,
             bvid: next.bvid,
             at: this.store.now(),
             source_ids: next.sources.map((s) => s.id),
-            scope: next.read_policy ? "subtitle_pages_presented_not_watch_completion" : "subtitle_material_presented_not_watch_completion",
+            scope:next.kind==='audio_transcript'?"transcript_pages_presented_not_watch_completion":next.read_policy?"subtitle_pages_presented_not_watch_completion":"subtitle_material_presented_not_watch_completion",
             attribution: "host_tool_result_receipt",
           };
           decision.exploration.exposure = exposure;
@@ -156,7 +161,7 @@ export class VideoReads {
             trace_id: next.feed.trace_id,
             decision_id: decision.id,
           });
-          emit("exploration.exposed", exposure, {
+          emit(previous?"video.text_supplement_read":"exploration.exposed", exposure, {
             session_id,
             trace_id: next.feed.trace_id,
             decision_id: decision.id,
@@ -166,19 +171,19 @@ export class VideoReads {
   page({read_id,page}) {
     return this.store.transaction({state:false},d=>{
       const read=d.reads.get(read_id)
-      if(!read?.session_id||read.kind!=='subtitles')throw Error('Subtitle page needs a presented subtitle receipt')
+      if(!read?.session_id||!isVideoTextKind(read.kind))throw Error('Subtitle page needs a presented subtitle receipt')
       if(read.coverage.truncated)throw Error('Truncated acquisition cannot claim a complete subtitle read')
       const source=read.sources[page-1]
       if(!source)throw Error('Unknown subtitle page')
       const text=this.store.getObject(source.object.hash).content.excerpt
-      return {type:'bili.subtitle_page.v1',read_id,page,total_pages:read.sources.length,material_hash:read.material.hash,text,receipt_hash:hash([read_id,page,source.object.hash,text])}
+      return {type:read.kind==='audio_transcript'?'bili.video_text_page.v1':'bili.subtitle_page.v1',read_id,page,total_pages:read.sources.length,material_hash:read.material.hash,text,receipt_hash:hash([read_id,page,source.object.hash,text])}
     })
   }
   async acceptPage(payload,{session_id,trace_id=null,route=null,learn=true,host_seq=null,tool_call_id=null}) {
-    if(payload?.type!=='bili.subtitle_page.v1')return []
+    if(!['bili.subtitle_page.v1','bili.video_text_page.v1'].includes(payload?.type))return []
     return this.store.transaction({},(d,emit)=>{
       const read=d.reads.get(payload.read_id),page=payload.page
-      if(!read||read.session_id!==session_id||read.kind!=='subtitles'||read.coverage.truncated||!Number.isInteger(page))return []
+      if(!read||read.session_id!==session_id||!isVideoTextKind(read.kind)||read.coverage.truncated||!Number.isInteger(page))return []
       if(read.requires_delivery&&!Number.isSafeInteger(host_seq))return []
       const source=read.sources[page-1];if(!source)return []
       const text=this.store.getObject(source.object.hash).content.excerpt
@@ -186,7 +191,7 @@ export class VideoReads {
       const pages=[...new Set([...(read.pages_presented??[]),page])].sort((a,b)=>a-b)
       if(read.pages_presented?.includes(page))return [read.id]
       const complete=pages.length===read.sources.length,next={...read,pages_presented:pages,body_complete:complete,last_page_host_seq:Number.isSafeInteger(host_seq)?Math.max(host_seq,read.last_page_host_seq??0):null,reading_complete:false}
-      emit('video.subtitle_page_presented',{read_id:read.id,page,total_pages:read.sources.length,object:source.object,host_seq,tool_call_id},{session_id,trace_id,decision_id:read.feed?.decision_id??null})
+      emit(read.kind==='audio_transcript'?'video.transcript_page_presented':'video.subtitle_page_presented',{read_id:read.id,page,total_pages:read.sources.length,object:source.object,host_seq,tool_call_id},{session_id,trace_id,decision_id:read.feed?.decision_id??null})
       if(complete&&!read.requires_delivery)this.finishReading(d,emit,next,{session_id,trace_id,route,learn})
       if(!complete||read.requires_delivery)d.reads.put(next);return [read.id]
     })
@@ -194,7 +199,7 @@ export class VideoReads {
   finishReading(d,emit,read,{session_id,trace_id=null,route=null,learn=true,delivery=null}) {
     const next={...read,reading_complete:true,read_completed_at:new Date(this.store.now()).toISOString(),learning_queued:read.learning_queued||learn,...(delivery?{delivery}: {})}
     if(learn&&!read.learning_queued)this.queueSources(d,emit,read,{session_id,trace_id,route})
-    emit('video.subtitle_read_completed',{read_id:read.id,bvid:read.bvid,pages:read.pages_presented.length,source_ids:read.sources.map(s=>s.id),delivery,scope:delivery?'all_subtitle_pages_delivered_to_model':'all_subtitle_pages_in_native_tool_results'},{session_id,trace_id,decision_id:read.feed?.decision_id??null})
+    emit(read.kind==='audio_transcript'?'video.transcript_read_completed':'video.subtitle_read_completed',{read_id:read.id,bvid:read.bvid,pages:read.pages_presented.length,source_ids:read.sources.map(s=>s.id),delivery,scope:read.kind==='audio_transcript'?(delivery?'all_transcript_pages_delivered_to_model':'all_transcript_pages_in_native_tool_results'):delivery?'all_subtitle_pages_delivered_to_model':'all_subtitle_pages_in_native_tool_results'},{session_id,trace_id,decision_id:read.feed?.decision_id??null})
     this.expose(d,emit,next,session_id);d.reads.put(next);settleVideoRead(d,emit,next,this.store.now())
   }
   acceptDelivery({session_id,through_seq,host_seq,route=null,learn=true}) {
@@ -212,14 +217,14 @@ export class VideoReads {
   resume(session_id,route=null) {
     return this.store.transaction({state:false},(d,emit)=>{
       for(const read of d.reads.awaiting(session_id)) {
-        if(read.read_policy&&read.kind==='subtitles'&&!read.reading_complete)continue
+        if(read.read_policy&&isVideoTextKind(read.kind)&&!read.reading_complete)continue
         this.queueSources(d,emit,read,{session_id,trace_id:read.trace_id??null,route})
         const next={...read,learning_queued:true};d.reads.put(next);settleVideoRead(d,emit,next,this.store.now())
       }
     })
   }
   seen() {
-    return this.store.journal.use(db=>db.prepare("SELECT DISTINCT bvid FROM video_reads WHERE kind='subtitles' AND (json_extract(payload,'$.read_policy') IS NULL OR json_extract(payload,'$.reading_complete')=1) AND status IN ('presented','assessed') ORDER BY bvid").all().map(r=>r.bvid))
+    return this.store.journal.use(db=>db.prepare("SELECT DISTINCT bvid FROM video_reads WHERE kind IN ('subtitles','audio_transcript') AND (json_extract(payload,'$.read_policy') IS NULL OR json_extract(payload,'$.reading_complete')=1) AND status IN ('presented','assessed') ORDER BY bvid").all().map(r=>r.bvid))
   }
   get(id) {
     return this.store.transaction({state:false},d=>d.reads.get(id))

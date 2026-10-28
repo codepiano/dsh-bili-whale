@@ -179,15 +179,15 @@ function cliBox(t,fixture,observe=true) {
   const home=box(t),profile=path.join(home,'profile'),privateDir=path.join(home,'.bili-ai'),concept=path.join(home,'concepts')
   fs.mkdirSync(profile);fs.mkdirSync(privateDir)
   const config=path.join(profile,'config.json'),data=path.join(home,'fixture.json'),requests=path.join(home,'requests.jsonl')
-  fs.writeFileSync(config,JSON.stringify({conceptSystem:{observe,learning:true,mode:'active'},risk:{minGapMs:0}}));fs.writeFileSync(data,JSON.stringify(fixture))
+  fs.writeFileSync(config,JSON.stringify({conceptSystem:{observe,learning:true,mode:'active'},reading:fixture.reading??{},risk:{minGapMs:0}}));fs.writeFileSync(data,JSON.stringify(fixture))
   fs.writeFileSync(path.join(privateDir,'credentials.json'),JSON.stringify({sessdata:'fixture',bili_jct:'fixture',buvid3:'fixture'}))
   const env={...process.env,HOME:home,USERPROFILE:home,DSH_HOME:profile,BILI_WHALE_CONFIG:config,BILI_CONCEPT_HOME:concept,BILI_NO_CACHE:'1',TEST_DEBRIEF_FIXTURE:data,TEST_REQUESTS:requests,
     NODE_OPTIONS:'--import='+pathToFileURL(fileURLToPath(new URL('./helpers/debrief-fetch.mjs',import.meta.url))).href}
-  return {concept,requests,env,run:()=>spawnSync(process.execPath,[fileURLToPath(new URL('../tools/commands/debrief.mjs',import.meta.url)),bv,'--no-frames'],{env,encoding:'utf8',timeout:15000})}
+  return {concept,requests,env,run:(args=[])=>spawnSync(process.execPath,[fileURLToPath(new URL('../tools/commands/debrief.mjs',import.meta.url)),bv,'--no-frames',...args],{env,encoding:'utf8',timeout:15000})}
 }
 
 test('real debrief CLI records text independently of missing cover, then host receipt feeds learning',async t=>{
-  const s=cliBox(t,{cover_failed:true}),result=s.run();assert.ifError(result.error);assert.equal(result.status,0,result.stderr)
+  const s=cliBox(t,{cover_failed:true}),result=s.run(['--context']);assert.ifError(result.error);assert.equal(result.status,0,result.stderr)
   const marker=result.stdout.match(/BILI_DEBRIEF_RECEIPT:[a-f0-9-]+:[a-f0-9]+/)[0]
   const reads=new VideoReads(new ObservationStore(s.concept));await reads.acceptOutput(marker,{session_id:'fish',route})
   const record=(await reads.store.events({type:'video.material_acquired'}))[0]
@@ -210,4 +210,36 @@ test('real CLI subtitle failures retain description provenance without claiming 
   const id=marker.split(':')[1],record=await reads.get(id),material=reads.store.getObject(record.material.hash).content
   assert.equal(record.kind,'description');assert.equal(material.components.subtitles,'failed');assert.deepEqual(reads.seen(),[])
   assert.equal(reads.store.getObject(record.sources[0].object.hash).content.video.section,'description')
+})
+
+
+test('default CLI fetches only metadata and subtitles, preferring human zh-CN over AI tracks',async t=>{
+  const s=cliBox(t,{multiple_tracks:true}),r=s.run();assert.equal(r.status,0,r.stderr)
+  const urls=fs.readFileSync(s.requests,'utf8').trim().split('\n').map(l=>JSON.parse(l).url)
+  assert.ok(!urls.some(u=>/cover|comment|reply|playurl/.test(u)))
+  const id=r.stdout.match(/BILI_DEBRIEF_RECEIPT:([^:]+):/)[1],store=new ObservationStore(s.concept),row=await new VideoReads(store).get(id)
+  const material=store.getObject(row.material.hash).content
+  assert.equal(material.track.language,'zh-CN');assert.equal(material.track.automatic,false)
+  assert.equal(material.components.cover,'skipped');assert.equal(material.components.audio,'skipped')
+})
+
+test('CLI local audio fallback retains distinct provenance and never contacts context endpoints',async t=>{
+  const home=box(t),model=path.join(home,'ggml-fixture.bin'),bin=path.join(home,'fixture-media')
+  fs.writeFileSync(model,'fixture model');fs.writeFileSync(bin,'#!'+process.execPath+'\n'+`
+    import fs from 'node:fs';
+    const args=process.argv.slice(2),out=args[args.indexOf('-of')+1];
+    if(args.includes('-oj'))fs.writeFileSync(out+'.json',JSON.stringify({transcription:[{offsets:{from:0,to:4000},text:'康德讨论认识的边界。'}]}));
+    else fs.writeFileSync(args.at(-1),'fixture wav');
+  `,{mode:0o700})
+  const s=cliBox(t,{no_subtitles:true,reading:{audio:{model,executable:bin}}});s.env.FFMPEG=bin
+  const r=s.run();assert.equal(r.status,0,r.stderr)
+  const id=r.stdout.match(/BILI_DEBRIEF_RECEIPT:([^:]+):/)[1],store=new ObservationStore(s.concept),reads=new VideoReads(store),row=await reads.get(id)
+  assert.equal(row.kind,'audio_transcript',r.stdout+r.stderr)
+  const material=store.getObject(row.material.hash).content
+  assert.equal(material.transcription.engine,'whisper.cpp');assert.equal(material.transcription.audio_hash,hash('fixture audio'))
+  assert.equal(material.sources[0].video.section,'audio_transcript');assert.match(material.text,/康德/)
+  const urls=fs.readFileSync(s.requests,'utf8');assert.match(urls,/playurl/);assert.doesNotMatch(urls,/cover|comment|reply/)
+  const never=cliBox(t,{no_subtitles:true,reading:{audio:{model,executable:bin}}});never.env.FFMPEG=bin
+  assert.equal(never.run(['--audio','never']).status,0)
+  assert.doesNotMatch(fs.readFileSync(never.requests,'utf8'),/playurl/)
 })

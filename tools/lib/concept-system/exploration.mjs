@@ -322,7 +322,7 @@ export function mutateExploration(s, name, input, now, emit, links) {
     const engaged = ["engaged", "completed"].includes(input.outcome);
     if(engaged&&d.feed_judgment?.read_policy==='subtitle-pages-v1') {
       const exposure=d.exploration.exposure
-      if(exposure?.scope!=='subtitle_pages_presented_not_watch_completion')throw Error('Read all subtitle pages before exploration progress')
+      if(!['subtitle_pages_presented_not_watch_completion','transcript_pages_presented_not_watch_completion'].includes(exposure?.scope))throw Error('Read all subtitle pages before exploration progress')
       if(!input.source_ids.length||input.source_ids.some(id=>!exposure.source_ids.includes(id)))throw Error('Progress must cite this decision actual subtitle read')
       if(!input.answered||!input.next_step)throw Error('Actual reading progress needs an answer and next step')
     }

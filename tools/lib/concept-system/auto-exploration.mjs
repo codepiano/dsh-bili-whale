@@ -1,6 +1,6 @@
 import {config} from '../config.mjs'
 import {hash} from './store.mjs'
-import {VideoReads} from './video-reads.mjs'
+import {VideoReads,isVideoTextKind} from './video-reads.mjs'
 import {runFeed} from './operations.mjs'
 
 // Persistent orchestration is shared by every scheduled wake. The model supplies
@@ -47,13 +47,13 @@ export async function nextExploration(store,{cycle_id},{signal,feed=runFeed,read
   const rows=store.journal.use(db=>db.prepare("SELECT payload FROM video_reads WHERE json_extract(payload,'$.feed.run_id')=? ORDER BY rowid DESC").all(run_id).map(r=>JSON.parse(r.payload)))
   for(const video of slate.selected??[]) {
     const read=rows.find(r=>r.bvid===video.bv)
-    if(!read)return {...envelope,status:'reading_required',next_action:'debrief_read',arguments:{bvid:video.bv,feed_run_id:run_id},reason:'读取真实清单，字幕缺失时将继续下一条，不计曝光'}
+    if(!read)return {...envelope,status:'reading_required',next_action:'debrief_read',arguments:{bvid:video.bv,feed_run_id:run_id},reason:'字幕优先；缺字幕时尝试本地音频转写，仍无正文再继续其他材料，不计曝光'}
     if(read.status==='started') {
-      if(store.now()-Date.parse(read.started_at)<210000)return {...envelope,status:'read_in_progress',next_action:'wait',read_id:read.id}
+      if(store.now()-Date.parse(read.started_at)<1860000)return {...envelope,status:'read_in_progress',next_action:'wait',read_id:read.id}
       await new VideoReads(store).fail(read.id,Error('Fixed debrief acquisition deadline expired; continue other material'))
       continue
     }
-    if(read.kind!=='subtitles'||read.status==='failed'||read.coverage?.truncated)continue
+    if(!isVideoTextKind(read.kind)||read.status==='failed'||read.coverage?.truncated)continue
     if(!read.session_id)return {...envelope,status:'awaiting_host_receipt',next_action:'wait',read_id:read.id}
     if(!read.reading_complete) {
       if(read.body_complete)return {...envelope,status:'awaiting_model_delivery',next_action:'wait',read_id:read.id,reason:'等待正常模型提供方接收确认，不提前计曝光'}
@@ -61,7 +61,7 @@ export async function nextExploration(store,{cycle_id},{signal,feed=runFeed,read
       return {...envelope,status:'body_required',next_action:'video_read_page',arguments:{read_id:read.id,page},total_pages:read.sources.length,coverage:read.coverage}
     }
     const decision=store.state().concepts?.decisions[read.feed.decision_id],progress=decision?.exploration?.progress
-    if(!progress)return {...envelope,status:'progress_required',next_action:'exploration_progress',decision_id:read.feed.decision_id,read_id:read.id,source_ids:decision?.exploration?.exposure?.source_ids??[],target:decision?.exploration?.target,path:decision?.exploration?.path,instructions:'依据刚读完的字幕写 answered、remaining、next_step；引用给定来源。未解决保持 active。revisit 在原集合下建立有来源的后续问题，然后再次调用 exploration_next。'}
+    if(!progress)return {...envelope,status:'progress_required',next_action:'exploration_progress',decision_id:read.feed.decision_id,read_id:read.id,source_ids:decision?.exploration?.exposure?.source_ids??[],target:decision?.exploration?.target,path:decision?.exploration?.path,instructions:'依据刚读完的字幕或音频转写写 answered、remaining、next_step；引用给定来源。有视觉疑问时先用 video_read_frames(read_id,times,reason) 补看相关时间点；需要核实口述时可用 debrief_read(audio=always) 重取本地转写。未解决保持 active。revisit 在原集合下建立有来源的后续问题，然后再次调用 exploration_next。'}
     if(!['engaged','completed'].includes(progress.outcome))continue
     if(decision.exploration.path==='revisit') {
       const questions=Object.values(store.state().concepts.exploration.questions)
@@ -70,20 +70,20 @@ export async function nextExploration(store,{cycle_id},{signal,feed=runFeed,read
     }
     return store.transaction({},(d,emit)=>{
       const current=d.state.auto_exploration_cycles[cycle_id]
-      const result={...envelope,status:'complete',next_action:'stop',decision_id:decision.id,read_id:read.id,bvid:read.bvid,path:decision.exploration.path,source_ids:progress.source_ids,scope:'full_subtitle_pages_and_sourced_progress_not_whole_video_playback'}
+      const result={...envelope,status:'complete',next_action:'stop',decision_id:decision.id,read_id:read.id,bvid:read.bvid,path:decision.exploration.path,source_ids:progress.source_ids,scope:'full_text_pages_and_sourced_progress_not_whole_video_playback'}
       current.status='complete';current.result=result;current.completed_at=store.now()
       emit('exploration.cycle_completed',result,{decision_id:decision.id,trace_id:decision.trace_id})
       return result
     })
   }
   if(cycle.round>=cycle.max_rounds)return store.transaction({},(d,emit)=>{
-    const result={...envelope,status:'exhausted',next_action:'stop',reason:'三轮实际清单仍无完整可读字幕；保留失败历史，不生成曝光或虚构进展'}
+    const result={...envelope,status:'exhausted',next_action:'stop',reason:'三轮实际清单仍无完整可读字幕或音频转写；保留失败历史，不生成曝光或虚构进展'}
     const current=d.state.auto_exploration_cycles[cycle_id];current.status='exhausted';current.result=result
     emit('exploration.cycle_exhausted',result,{source:'automatic_exploration'});return result
   })
   await store.transaction({},(d,emit)=>{
     const current=d.state.auto_exploration_cycles[cycle_id]
-    if(current.round===cycle.round) {current.round++;emit('exploration.cycle_continued',{cycle_id,previous_run_id:run_id,round:current.round,reason:'本轮没有取得完整字幕，继续实际搜索与选片，不把简介视为阅读'},{source:'automatic_exploration'})}
+    if(current.round===cycle.round) {current.round++;emit('exploration.cycle_continued',{cycle_id,previous_run_id:run_id,round:current.round,reason:'本轮没有取得完整正文，继续实际搜索与选片，不把简介视为阅读'},{source:'automatic_exploration'})}
   })
   return nextExploration(store,{cycle_id},{signal,feed,readConfig})
 }
