@@ -76,7 +76,7 @@ export const schemas = {
               bvid: z.string().regex(/^BV[0-9A-Za-z]{10}$/),
               exploration: z
                 .object({
-                  relevance: unit,
+                  relevance: unit.describe('对当前探索目标的相关度：无关/同名词碰巧命中为0，弱关联低于0.5不入选，0.5至1为有材料支持的相关候选。'),
                   reason: text,
                   quote: z.string().min(1).max(500),
                 })
@@ -88,7 +88,7 @@ export const schemas = {
                     .object({
                       collection_id: id,
                       member_id: id,
-                      strength: z.number().finite().min(-1).max(1),
+                      strength: z.number().finite().min(-1).max(1).describe('该立场对选择阅读的支持方向：建议读为正，建议跳过为负，无关为0；不是立场一致度或确信程度。'),
                       reason: text,
                       quote: z.string().min(1).max(500),
                     })

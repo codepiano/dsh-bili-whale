@@ -2,6 +2,12 @@ import { hash } from "./store.mjs";
 import { collectionStrength } from "./engine.mjs";
 import { explorationPlan } from "./exploration.mjs";
 
+export const FEED_RELEVANCE_POLICY = Object.freeze({
+  algorithm: "feed-relevance-v1",
+  min_relevance: 0.5,
+});
+const assessmentInstructions =
+  "先判断候选是否有助于当前探索目标：relevance=0 表示无关或仅碰巧命中同名词，0到0.5以下表示弱关联、不足以入选，0.5到1表示有材料支持的相关候选。deep 的前置知识、反例与争议也可相关，不要求先证明结论；discover 针对陌生领域的学习价值判断，不要求命中旧兴趣。无合适内容可全给0，清单可短于n或为空。立场 strength 是该立场对【选择阅读这条视频】的支持方向：建议读为正，建议跳过为负，无关为0；不是材料与立场的一致度，也不是确信程度。“克制所以跳过”应为负，不能因完成评估流程而加分。";
 
 function automaticContinuation(state,run_id) {
   const cycle=Object.values(state.auto_exploration_cycles??{}).find(c=>run_id===`${c.id}-r${c.round}`)
@@ -128,8 +134,9 @@ export async function selectJudged(
                 content: targetMember.content,
               }
             : null,
+          selection_policy: FEED_RELEVANCE_POLICY,
           instructions:
-            "依据候选标题/简介逐条填写 feed_assess；每条均评估给出的全部立场，strength 为 -1 到 1（无关为 0），quote 必须逐字来自该候选材料。说明对所选探索路径的相关度、理由与引文；discover 还须从材料逐字提取 discovered_term。材料只是未核实的候选信息，不是已观看或事实。评估后以相同参数和 run-id 再次执行 feed，程序才产生实际清单；无合适候选可全部给 exploration.relevance=0。",
+            assessmentInstructions + "依据候选标题/简介逐条填写 feed_assess；每条均评估给出的全部立场，strength 为 -1 到 1（无关为 0），quote 必须逐字来自该候选材料。说明对所选探索路径的相关度、理由与引文；discover 还须从材料逐字提取 discovered_term。材料只是未核实的候选信息，不是已观看或事实。评估后以相同参数和 run-id 再次执行 feed，程序才产生实际清单。",
         };
         const object = store.object(packet);
         d.state.feed_judgments ??= {};
@@ -174,8 +181,24 @@ export async function selectJudged(
       const assessment = store.getObject(run.assessment).content,
         route = packet.exploration,
         groups = feedGroups(s);
+      const candidate_filter = {
+        ...FEED_RELEVANCE_POLICY,
+        candidates: assessment.assessments.map((a) => ({
+          bvid: a.bvid,
+          relevance: a.exploration.relevance,
+          eligible: a.exploration.relevance >= FEED_RELEVANCE_POLICY.min_relevance,
+          reason: a.exploration.relevance >= FEED_RELEVANCE_POLICY.min_relevance
+            ? "meets_exploration_relevance"
+            : "below_exploration_relevance",
+          assessment_reason: a.exploration.reason,
+          quote: a.exploration.quote,
+        })),
+      };
+      emit("feed.candidates_filtered", {run_id: runId, ...candidate_filter}, {
+        trace_id: selector.trace, source: "feed",
+      });
       const remaining = assessment.assessments
-        .filter((a) => a.exploration.relevance > 0)
+        .filter((a) => a.exploration.relevance >= FEED_RELEVANCE_POLICY.min_relevance)
         .map((a) => ({ a, v: packet.candidates.find((v) => v.bv === a.bvid) }));
       const selected = [],
         decisions = [],
@@ -188,7 +211,7 @@ export async function selectJudged(
               .filter((x) => x.strength !== 0)
               .map((x) => ({
                 ...x,
-                relevance: 1,
+                relevance: a.exploration.relevance,
                 purpose: "stance",
                 reason: `${x.reason}；候选原文：${x.quote}`,
               }))
@@ -264,6 +287,7 @@ export async function selectJudged(
             assessment_object: run.assessment,
             material_scope: "candidate_metadata",
             stance_ids: packet.stances.map((x) => x.member_id),
+            relevance_policy: FEED_RELEVANCE_POLICY,
           },
           question: `feed 阅读清单第 ${selected.length + 1} 条：依据立场与探索目标选择`,
           scene: "watch",
@@ -307,6 +331,7 @@ export async function selectJudged(
         assessment_object: run.assessment,
         exploration_path: route?.path ?? null,
         policy: "feed-judged-v1",
+        candidate_filter,
         fallback: selected.length ? null : "no_suitable_assessed_candidates",
       };
       emit(
@@ -360,7 +385,7 @@ export async function assessFeed(store, input) {
           if (!text.includes(x.quote))
             throw Error(`Stance quote is not in candidate material: ${a.bvid}/${x.member_id}; neutral items may quote the exact candidate title`);
         }
-        if (p.exploration?.path === "discover" && a.exploration.relevance > 0) {
+        if (p.exploration?.path === "discover" && a.exploration.relevance >= FEED_RELEVANCE_POLICY.min_relevance) {
           if (!a.discovered_term || !text.includes(a.discovered_term))
             throw Error("Discovery needs a term quoted from actual material");
           if (

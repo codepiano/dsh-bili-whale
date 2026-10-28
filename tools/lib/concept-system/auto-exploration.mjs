@@ -41,7 +41,8 @@ export async function nextExploration(store,{cycle_id},{signal,feed=runFeed,read
       required_arguments={run_id,key:run_id+':'+(candidate?.bv??'empty')};
     }
     const instructions=`只调用 ${next_action}，使用 required_arguments；候选判断每次只提交当前这一个候选，逐项覆盖 packet.stances 全部成员（无关也填0，引文可逐字使用候选标题）。非 discover 不填写 discovered_term。完成后调用 exploration_next({cycle_id:"${cycle_id}"})。不要直接调用 feed_run、猜测参数或排查源码；该 cycle 的全部检索参数由状态机保管。`
-    return {...envelope,status:slate.status,next_action,required_arguments,packet:{...packet,instructions},instructions}
+    const combinedInstructions=[packet.instructions,instructions].filter(Boolean).join('\n')
+    return {...envelope,status:slate.status,next_action,required_arguments,packet:{...packet,instructions:combinedInstructions},instructions:combinedInstructions}
   }
   const rows=store.journal.use(db=>db.prepare("SELECT payload FROM video_reads WHERE json_extract(payload,'$.feed.run_id')=? ORDER BY rowid DESC").all(run_id).map(r=>JSON.parse(r.payload)))
   for(const video of slate.selected??[]) {

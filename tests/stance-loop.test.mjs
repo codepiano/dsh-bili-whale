@@ -581,3 +581,79 @@ test('automatic cycle advances a stale search instead of asking the model to rer
  const next=await nextExploration(store,{cycle_id:'conflict'},options);assert.equal(next.round,2);assert.equal(next.next_action,'feed_search_plan')
  assert.equal(store.events({type:'exploration.cycle_continued'}).at(-1).data.reason,'concept_state_changed_before_selection')
 })
+
+test('exploration relevance gates the slate before stance competition, fatigue and noise on every path', async t => {
+  for (const route of ['deep', 'revisit', 'discover']) {
+    const {store,engine,feed}=await fixture(t,route);
+    // The real acceptance run gave unrelated phone/esports results 0.02, yet
+    // positive "restraint, skip it" strengths let them fill an n=5 slate.
+    const candidates=[
+      {bv:'BV1dCCHYNEMv',t:'手机供应链：明年迭代线切直屏',up:'phone'},
+      {bv:'BV1vpHo6gEK8',t:'英雄联盟复盘，请维护好我最爱的白云黑土',up:'game'},
+      {bv:'BV1webz6sE1Z',t:'为什么vibecoding项目很难维护：重构记录',up:'code'},
+      {bv:'BV1X14y1k7RX',t:'Three.js开源项目及仓库',up:'three'},
+    ];
+    const args={candidates,legacy:candidates,n:5,per:2};
+    const packet=await feed.select(args);
+    assert.deepEqual(packet.selection_policy,{algorithm:'feed-relevance-v1',min_relevance:0.5});
+    const relevance=[0.02,0.49,0.85,0.5];
+    await engine.call('feed_assess',{key:'gated',run_id:'run',assessments:packet.candidates.map((v,i)=>({
+      bvid:v.bv,exploration:{relevance:relevance[i],reason:i<2?'同名词误命中，与探索目标无关':'可用的工程材料',quote:v.t},
+      discovered_term:v.t,
+      // Even a wrongly positive, very strong stance cannot admit an unrelated candidate.
+      stances:packet.stances.map(s=>({collection_id:s.collection_id,member_id:s.member_id,strength:i<2?1:0.1,reason:i<2?'应跳过':'适度支持阅读',quote:v.t})),
+    }))});
+    const result=await feed.resume({n:5,per:2});
+    assert.equal(result.selected.length,2);
+    assert.deepEqual(new Set(result.selected.map(v=>v.bv)),new Set(candidates.slice(2).map(v=>v.bv)));
+    assert.equal(result.decisions.length,2);
+    assert.deepEqual(result.candidate_filter.candidates.map(x=>x.eligible),[false,false,true,true]);
+    for(const d of result.decisions){
+      const preview=store.getObject(store.preview(d.preview_id).object).content;
+      assert.ok(preview.rows.every(row=>!candidates.slice(0,2).some(v=>v.bv===row.label)));
+      for(const row of preview.rows)assert.ok(row.contributions.filter(x=>x.purpose==='stance').every(x=>x.relevance===relevance[candidates.findIndex(v=>v.bv===row.label)]));
+      assert.equal(engine.replay(d.preview_id).matches,true);
+    }
+    if(route==='discover')assert.ok(Object.values(store.state().concepts.members).filter(m=>m.status==='pending').every(m=>!candidates.slice(0,2).some(v=>v.t===m.content)));
+    const before=hash(store.state());
+    assert.deepEqual(await feed.resume({n:5,per:2}),result);
+    assert.equal(hash(store.state()),before);
+    assert.equal(store.events({type:'feed.candidates_filtered'}).length,1);
+  }
+});
+
+test('weak-only judgments return an audited empty slate without decisions, fatigue or discovery capture',async t=>{
+  const {store,engine,feed,args}=await fixture(t,'discover'),packet=await feed.select(args);
+  const judgments=assessments(packet);
+  judgments.forEach((a,i)=>{a.exploration.relevance=i?0.49:0;delete a.discovered_term;a.stances.forEach(s=>s.strength=1)});
+  await engine.call('feed_assess',{key:'all-weak',run_id:'run',assessments:judgments});
+  const before=hash(store.state().concepts),result=await feed.resume({n:1,per:2});
+  assert.deepEqual(result.selected,[]);
+  assert.equal(result.fallback,'no_suitable_assessed_candidates');
+  assert.deepEqual(result.decisions,[]);
+  assert.equal(hash(store.state().concepts),before);
+  assert.equal(store.events({type:'decision.committed'}).length,0);
+  assert.equal(result.candidate_filter.candidates.length,2);
+});
+
+test('automatic continuation retains the relevance and signed selection rubric in each candidate packet',async t=>{
+  const {nextExploration}=await import('../tools/lib/concept-system/auto-exploration.mjs');
+  const {store,engine}=await fixture(t);
+  const next=()=>nextExploration(store,{cycle_id:'rubric'},{readConfig:()=>config,feed:async arg=>{
+    const f=new FeedConcepts({config,store,runId:arg.run_id,seed:arg.seed});
+    const ready=await f.plan([]);
+    return ready.status==='search_plan_required'?ready:f.select({candidates:videos,legacy:videos,n:arg.n,per:arg.per});
+  }});
+  let out=await next();
+  await engine.call('feed_search_plan',{...out.required_arguments,queries:['测量误差'],reason:'补充方法'});
+  out=await next();
+  assert.equal(out.next_action,'feed_assess');
+  assert.match(out.instructions,/克制所以跳过/);
+  assert.match(out.packet.instructions,/清单可短于n或为空/);
+  assert.match(out.packet.instructions,/0.5/);
+  const a=assessments(out.packet);
+  await engine.call('feed_assess',{...out.required_arguments,assessments:a});
+  out=await next();
+  assert.equal(out.next_action,'feed_assess');
+  assert.match(out.packet.instructions,/建议跳过为负/);
+});
