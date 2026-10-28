@@ -80,3 +80,24 @@ test('custom DSH_HOME is used by deps, notify and selftest without touching defa
   assert.ok(self.stdout.split('\n').some(line=>line.includes('目录 DSH_HOME')&&line.includes(dsh)&&line.includes('✓')),self.stdout)
   assert.equal(fs.existsSync(path.join(f.dir,'.dsh')),false)
 })
+
+test('canonical host session identity is used for delivery, tracking and restart without recreating a nonblank session',async t=>{
+ const f=fixture(t),tracked=[]
+ f.args.onSession=id=>tracked.push(id)
+ f.args.controller.create=async r=>{f.created.push(r);return {sessionId:'session-canonical'}}
+ await f.make().send(f.request)
+ assert.equal(f.sent[0].sessionId,'session-canonical')
+ assert.equal(JSON.parse(fs.readFileSync(path.join(f.dir,'whale-session.json'))).id,'session-canonical')
+ assert.equal(tracked.at(-1),'session-canonical')
+ await f.make().send(f.request)
+ assert.equal(f.created.length,1)
+ assert.equal(f.sent.at(-1).sessionId,'session-canonical')
+})
+test('failed prompt retains canonical identity and reliable request receipt across retry',async t=>{
+ const f=fixture(t);f.args.controller.create=async r=>{f.created.push(r);return {sessionId:'session-canonical'}}
+ const d=f.make(),request={requestId:'durable-native-receipt',content:[{type:'text',text:'实际请求'}]}
+ f.fail(true);await assert.rejects(d.send(request,undefined,{retainUntilAck:true}),/send failed/)
+ f.fail(false);await f.make().send(request,undefined,{retainUntilAck:true})
+ assert.equal(f.created.length,1);assert.equal(f.sent[0].sessionId,'session-canonical')
+ assert.equal(f.sent[0].requestId,'durable-native-receipt')
+})
