@@ -444,6 +444,7 @@ export class SqliteJournal {
             awaiting: sessionId => db.prepare("SELECT payload FROM video_reads WHERE status='presented' AND json_extract(payload,'$.session_id')=? AND json_extract(payload,'$.learning_queued') IS NOT 1 AND kind!='none' LIMIT 24").all(sessionId).map(r=>JSON.parse(r.payload)),
           },
           jobs: {
+            completed: (limit=200) => db.prepare("SELECT payload FROM learning_jobs WHERE status='done' ORDER BY rowid DESC LIMIT ?").all(limit).map(r=>JSON.parse(r.payload)).reverse(),
             get: (id) => {
               const row = db.prepare("SELECT payload FROM learning_jobs WHERE id=?").get(id);
               return row ? JSON.parse(row.payload) : null;

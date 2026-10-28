@@ -259,6 +259,7 @@ export class ConceptEngine {
         this.store,
         input,
       );
+    if(name==='persona_revision_history'||name==='persona_revision_rollback'){const {PersonaRevisions}=await import('./persona-revision.mjs');const manager=new PersonaRevisions({store:this.store});return name==='persona_revision_history'?manager.status(input.limit):manager.rollback(input)}
     if (name === "concept_query") return this.query(input);
     if (name === 'concept_catalog') return catalogQuery(get({state:this.store.state()}),input);
     if (name === "trace_get") return this.store.events(input);

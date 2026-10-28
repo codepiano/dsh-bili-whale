@@ -1,5 +1,7 @@
 # 概念系统第一版使用与验证
 
+persona 自主修订、来源版本与回滚见 [自主修订机制](PERSONA-REVISION.md)。
+
 概念群目录、已有群归属与定义维护见 [概念群目录与归属](CONCEPT-CATALOG.md)。
 
 开发分支上的实现，不代表已安装或发布。观察、学习数据保存在 `~/.bili-ai/concept-system/`，可以用 `BILI_CONCEPT_HOME` 指向独立测试目录。不要把此目录放进公开仓库。

@@ -7,6 +7,8 @@ import { redact } from "./lib/concept-system/store.mjs";
 const engine = new ConceptEngine(),
   server = new McpServer({ name: "bili-whale-concepts", version: "0.1.0" });
 const descriptions = {
+  persona_revision_history:'查看 persona 当前文件、哈希、自动修订/回滚版本、来源与修改理由；不修改文件。',
+  persona_revision_rollback:'将指定修订恢复到修改前；必须携带当前文件 expected_hash 和理由。保留新回滚版本与原历史，拒绝覆盖未知外部修改。',
   concept_catalog:'概念群目录索引。可按主体、关键词分页检索；包含定义、归属边界、别名、代表成员及原始来源。先查目录，用群ID归类，缺少定义会显式标记。',
   concept_catalog_update:'补充概念群的定义、边界、别名和关联群。必须引用本群已有来源并说明理由；不合并、移动或删除成员。',
   exploration_next:'日常自动探索状态机。依次返回搜索规划、候选判断、实际选片、无字幕续找、完整字幕逐页阅读、问题进展，最后 complete/exhausted。始终沿用 cycle_id，不手工伪造阅读状态。',
@@ -48,6 +50,7 @@ const descriptions = {
     "显式归档已返回的 DS 正文和可用推理；必须指向已准备提示，不伪造推理。",
 };
 const readonly = new Set([
+  'persona_revision_history',
   'concept_catalog',
   "exploration_plan",
   "exploration_query",

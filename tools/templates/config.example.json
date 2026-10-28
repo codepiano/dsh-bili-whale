@@ -93,6 +93,7 @@
   "conceptSystem": {
     "observe": false,
     "learning": true,
+    "personaRevision": true,
     "mode": "shadow",
     "renderBudget": 400
   }
