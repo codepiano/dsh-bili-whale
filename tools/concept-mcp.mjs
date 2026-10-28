@@ -7,6 +7,8 @@ import { redact } from "./lib/concept-system/store.mjs";
 const engine = new ConceptEngine(),
   server = new McpServer({ name: "bili-whale-concepts", version: "0.1.0" });
 const descriptions = {
+  feed_run: "执行真实只读平台检索与选片流程，固定参数由插件服务运行，不需要会话终端写入学习目录。按 search_plan_required / judgment_required 完成规划和判断后，重复相同参数恢复同一 run-id。不会评论、收藏或发送。",
+  debrief_read: "读取已选视频的真实简介/字幕并返回 debrief 物料回执；由插件服务执行，只读平台，不评论或收藏；固定 no-frames，无任意命令或路径参数。",
   feed_search_plan:
     "为 feed 的 search_plan_required 阶段提出符合程序所选探索路径的查询词和理由；不修改概念标签。随后恢复原 run-id 真实检索。",
   feed_assess:
@@ -60,12 +62,12 @@ for (const [name, inputSchema] of Object.entries(schemas))
       annotations: {
         readOnlyHint: readonly.has(name),
         destructiveHint: false,
-        openWorldHint: false,
+        openWorldHint: ["feed_run","debrief_read"].includes(name),
       },
     },
-    async (args) => {
+    async (args, extra) => {
       try {
-        const result = await engine.call(name, args);
+        const result = await engine.call(name, args, {signal:extra.signal});
         return { content: [{ type: "text", text: JSON.stringify(result) }] };
       } catch (e) {
         return {

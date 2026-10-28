@@ -229,7 +229,7 @@ export class ConceptEngine {
   constructor(store = new ObservationStore()) {
     this.store = store;
   }
-  async call(name, raw = {}) {
+  async call(name, raw = {}, {signal} = {}) {
     if (!schemas[name]) throw Error("Unknown concept tool");
     const input = redact(schemas[name].parse(raw));
     if (name === "observation_capture")
@@ -244,6 +244,8 @@ export class ConceptEngine {
       );
     if (name === "exploration_query")
       return explorationQuery(get({ state: this.store.state() }), input);
+    if (name === "feed_run") return (await import('./operations.mjs')).runFeed(input,{signal});
+    if (name === "debrief_read") return (await import('./operations.mjs')).readDebrief(input,{signal});
     if (name === "feed_search_plan")
       return (await import("./feed-judgment.mjs")).assessSearch(
         this.store,
@@ -577,6 +579,7 @@ export class ConceptEngine {
         )
         .sort(
           (a, b) =>
+            Number(b.members.some(id=>s.members[id]?.status==='accepted'&&s.members[id].tags.includes('belief')&&s.members[id].interpretation==='explicit')) - Number(a.members.some(id=>s.members[id]?.status==='accepted'&&s.members[id].tags.includes('belief')&&s.members[id].interpretation==='explicit')) ||
             collectionStrength(b, s) - collectionStrength(a, s) ||
             a.id.localeCompare(b.id),
         ),
@@ -604,7 +607,7 @@ export class ConceptEngine {
       if (!items.length) continue;
       for (const m of items) {
         if (selected.includes(m.id) || omitted.includes(m.id)) continue;
-        const line = `\n${c.name}：${m.content}`;
+        const line = `\n${m.tags.includes("belief")?"立场·":""}${c.name}：${m.content}`;
         if ([...(text + line)].length <= budget) {
           text += line;
           selected.push(m.id);

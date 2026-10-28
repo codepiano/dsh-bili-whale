@@ -451,3 +451,35 @@ test("the real CLI requires a path-specific search plan, retrieves its queries, 
     1,
   );
 });
+
+test('fixed MCP business operations complete feed stages and acquire real CLI subtitle receipts without terminal filesystem grants',async t=>{
+ const {home,store,engine}=await fixture(t),profile=path.join(home,'mcp-profile'),privateDir=path.join(home,'mcp-user','.bili-ai')
+ fs.mkdirSync(profile,{recursive:true});fs.mkdirSync(privateDir,{recursive:true})
+ const configPath=path.join(profile,'bili-whale.config.json');fs.writeFileSync(configPath,JSON.stringify({...config,preferences:{like:['AI'],dislike:[]},risk:{minGapMs:0}}))
+ fs.writeFileSync(path.join(privateDir,'credentials.json'),JSON.stringify({sessdata:'fixture',bili_jct:'fixture',buvid3:'fixture'}))
+ const poolFile=path.join(home,'mcp-pool.json'),requests=path.join(home,'mcp-requests.jsonl'),debriefFixture=path.join(home,'debrief-fixture.json')
+ fs.writeFileSync(poolFile,JSON.stringify(videos.map(v=>({bvid:v.bv,title:'AI '+v.t,description:v.description,duration:'05:00',danmaku:30,play:1000,author:v.up}))))
+ fs.writeFileSync(debriefFixture,JSON.stringify({cover_failed:true,body:[{from:0,to:12,content:'测试材料说明怎样检验证据与误差。'}]}))
+ const {Client}=await import('@modelcontextprotocol/sdk/client/index.js'),{StdioClientTransport}=await import('@modelcontextprotocol/sdk/client/stdio.js'),{fileURLToPath,pathToFileURL}=await import('node:url')
+ const env={...process.env,USERPROFILE:path.join(home,'mcp-user'),DSH_HOME:profile,BILI_WHALE_CONFIG:configPath,BILI_CONCEPT_HOME:home,TEST_FEED_POOL:poolFile,TEST_REQUESTS:requests,TEST_DEBRIEF_FIXTURE:debriefFixture}
+ async function connect(helper){const transport=new StdioClientTransport({command:process.execPath,args:[fileURLToPath(new URL('../tools/concept-mcp.mjs',import.meta.url))],env:{...env,NODE_OPTIONS:'--import='+pathToFileURL(fileURLToPath(new URL('./helpers/'+helper,import.meta.url))).href},stderr:'pipe'});const client=new Client({name:'scoped-operations-test',version:'1'});await client.connect(transport);t.after(()=>client.close());return client}
+ const client=await connect('feed-fetch.mjs')
+ const call=async(client,name,args)=>{const result=await client.callTool({name,arguments:args});assert.equal(result.isError,undefined,result.content?.[0]?.text);return JSON.parse(result.content[0].text)}
+ const args={run_id:'mcp-scoped',n:1,per:2,pool:20,source:'search'}
+ const request=await call(client,'feed_run',args);assert.equal(request.status,'search_plan_required')
+ await call(client,'feed_search_plan',{key:'mcp-queries',run_id:args.run_id,queries:['检验AI证据'],reason:'针对立场寻找可复核的方法'})
+ const pending=await call(client,'feed_run',args);assert.equal(pending.status,'judgment_required')
+ await call(client,'feed_assess',{key:'mcp-judge',run_id:args.run_id,assessments:assessments(pending)})
+ const selected=await call(client,'feed_run',args);assert.equal(selected.selected.length,1)
+ await client.close()
+ const reader=await connect('debrief-fetch.mjs')
+ const read=await call(reader,'debrief_read',{bvid:selected.selected[0].bv,feed_run_id:args.run_id})
+ assert.match(read.receipt_marker,/BILI_DEBRIEF_RECEIPT:/)
+ const rid=read.receipt_marker.split(':')[1],row=await new VideoReads(store).get(rid)
+ assert.equal(row.feed.decision_id,selected.decisions[0].id);assert.equal(row.status,'acquired');assert.equal(row.kind,'subtitles')
+ assert.equal(store.events({type:'exploration.exposed'}).length,0,'MCP API acquisition alone is not host receipt delivery')
+ await assert.rejects(engine.call('feed_run',{run_id:'bad',command:'arbitrary'}))
+ await assert.rejects(engine.call('debrief_read',{bvid:'BV;bad',feed_run_id:args.run_id}))
+ assert.ok(fs.readFileSync(requests,'utf8').split('\n').filter(Boolean).every(l=>JSON.parse(l).method==='GET'))
+ await reader.close()
+})

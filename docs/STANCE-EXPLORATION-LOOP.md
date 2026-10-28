@@ -4,6 +4,8 @@
 
 ## 实际选片协议
 
+沙箱会话优先调用 `feed_run` 与 `debrief_read`：它们在已配置的插件 MCP 服务内执行固定业务参数，平台访问只读，保留原账号与流量保护，不接受任意可执行文件、环境或输出路径。CLI 仍可使用。
+
 沿用同一组 `--run-id`、`--seed`、`--n`、`--per`、`--pool`、`--source` 参数重跑 feed：
 
 1. `search_plan_required`：程序按配置比例、有效问题与真实曝光欠额选定 deep / revisit / discover。模型调用 `feed_search_plan`，提交 1–4 条针对该路径的短查询词及理由。程序真实检索这些词，并保留少量原配置查询作为补充。
@@ -39,6 +41,7 @@
 
 - `learning.context_prepared`：只证明程序准备了候选上下文，含 selected / omitted 成员 ID。
 - `learning.context_admitted`：只有真实原生 runtime-context 消息的段落与准备内容匹配，才证明宿主接收，附 session、原生消息序号和成员 ID。
+- `learning.context_delivered`：只有真实 DeepSeek 会话日志送达确认的 throughSeq 覆盖已接收上下文消息，才记录提供方送达；其他提供方未返回这类凭证时不伪造。
 - `request/header`、实际模型响应及工具结果：用于把注入与真正的一轮执行对应起来。
 
 不通过手工插入“已注入”事件验收；不在空 pre-step 中增加消息维持循环。shadow 不改变清单与模型上下文，observe=false 保留原功能且不创建学习数据库。
@@ -50,3 +53,5 @@
 ## 宿主会话身份
 
 Desktop 的 create 可能返回不同于请求值的正式 sessionId。插件使用返回值投递、跟踪并持久化；已有会话在重启时直接由 prompt 恢复，不再次 create 一个新的空会话。这样动态学习钩子、模型请求与工具结果使用同一个实际身份。
+
+固定业务 MCP 的客户端超时应为 240000ms（示例配置已更新），以覆盖实际检索和字幕读取；取消信号继续传递到子进程，不扩大终端或文件系统权限。
