@@ -2,6 +2,11 @@ import { hash } from "./store.mjs";
 import { collectionStrength } from "./engine.mjs";
 import { explorationPlan } from "./exploration.mjs";
 
+
+function automaticContinuation(state,run_id) {
+  const cycle=Object.values(state.auto_exploration_cycles??{}).find(c=>run_id===`${c.id}-r${c.round}`)
+  return cycle?{next:`调用 exploration_next({cycle_id:"${cycle.id}"})，由状态机执行检索与恢复；不要直接调用 feed_run。`,next_action:'exploration_next',arguments:{cycle_id:cycle.id}}:{}
+}
 export function stanceMembers(state) {
   if (!state) return [];
   return Object.values(state.collections)
@@ -393,6 +398,7 @@ export async function assessFeed(store, input) {
         status: "assessed",
         assessment_object: object.hash,
         next: "重新执行 feed，沿用原 run-id 与参数；程序将实际算分并选入阅读清单",
+        ...automaticContinuation(d.state,input.run_id),
       };
     },
   );
@@ -534,6 +540,7 @@ export async function assessSearch(store, input) {
         run_id: input.run_id,
         status: "search_ready",
         next: "以相同参数和 run-id 再次执行 feed，真实检索这些查询词。",
+        ...automaticContinuation(d.state,input.run_id),
       };
     },
   );

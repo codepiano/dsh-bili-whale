@@ -69,3 +69,4 @@ Desktop 的 create 可能返回不同于请求值的正式 sessionId。插件使
 `night.readOnly` 默认 false；true 时普通日常唤醒仍完成探索、阅读与本地问题进展，但跳过收藏及对外消息/推送。shadow/disabled 保留原有非主动概念选片流程，不伪称完成主动探索闭环。
 
 自动 cycle 的返回值附带完整 feed_arguments 和 continue_with；嵌套 packet.instructions 同步改为回到 exploration_next，不再残留手动 feed 协议的“原参数重跑 feed”指引，避免模型用 feed_run 默认 n/pool 导致指纹冲突并误入源码排查。
+`feed_search_plan`、`feed_assess` 自身的回执也识别归属 cycle，返回相同的 exploration_next 续接工具与参数，避免紧邻工具回执重新覆盖成手动 feed 指引；独立手动 run-id 保持原协议。
