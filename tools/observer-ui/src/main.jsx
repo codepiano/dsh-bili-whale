@@ -68,6 +68,9 @@ const tagText = {
   sentence_pattern: "句式",
 };
 const eventText = {
+  "exploration.configured": "探索比例配置",
+  "exploration.question_updated": "探索问题更新",
+  "exploration.progress_recorded": "探索进展",
   "decision.previewed": "决策预演",
   "decision.committed": "实际选择",
   "feedback.recorded": "结果反馈",
@@ -590,6 +593,85 @@ function DecisionDetail({ id, revision }) {
                 </Text>
               )}
             </Paper>
+            {p.exploration && (
+              <Paper withBorder p="md" radius="md">
+                <Stack gap="xs">
+                  <Title order={3}>
+                    探索路径：
+                    {
+                      {
+                        deep: "领域深挖",
+                        revisit: "稀疏群回访",
+                        discover: "新词发现",
+                      }[p.exploration.path]
+                    }
+                  </Title>
+                  <Text size="sm">
+                    比例（深挖 / 回访 / 发现）：
+                    {["deep", "revisit", "discover"]
+                      .map(
+                        (key) =>
+                          `${Math.round(p.exploration.config.ratios[key] * 100)}%`,
+                      )
+                      .join(" / ")}
+                  </Text>
+                  <Text size="sm">
+                    规划依据：{p.exploration.planner_reason}
+                  </Text>
+                  <Text size="sm">本次探索理由：{p.exploration.reason}</Text>
+                  {d.committed?.exploration &&
+                    (() => {
+                      const x = d.committed.exploration,
+                        progress = x.progress;
+                      return (
+                        <>
+                          <Text size="sm">
+                            探索目标：
+                            {x.target_snapshot.question ??
+                              x.target_snapshot.name ??
+                              x.target_snapshot.content}
+                          </Text>
+                          {x.target_snapshot.next_step && (
+                            <Text size="sm">
+                              计划下一步：{x.target_snapshot.next_step}
+                            </Text>
+                          )}
+                          <Text size="sm">候选选择理由：{x.option_reason}</Text>
+                          <Text size="sm">
+                            实际进展：
+                            {progress
+                              ? {
+                                  engaged: "已接触",
+                                  completed: "已完成",
+                                  skipped: "跳过",
+                                  failed: "失败",
+                                }[progress.outcome]
+                              : "尚未记录实际接触，不计曝光"}
+                          </Text>
+                          {progress && (
+                            <>
+                              <Text size="sm">进展说明：{progress.reason}</Text>
+                              <Text size="sm">
+                                已回答：{progress.answered || "尚未确认"}
+                              </Text>
+                              <Text size="sm">
+                                剩余问题：{progress.remaining || "未记录"}
+                              </Text>
+                              <Text size="sm">
+                                下一步：{progress.next_step || "未记录"}
+                              </Text>
+                              <Text size="xs" c="dimmed">
+                                来源：{progress.source_ids.join("、") || "无"} ·
+                                调用方报告
+                              </Text>
+                            </>
+                          )}
+                        </>
+                      );
+                    })()}
+                </Stack>
+              </Paper>
+            )}
             <div>
               <Text size="sm" fw={650} mb="sm">
                 候选竞争

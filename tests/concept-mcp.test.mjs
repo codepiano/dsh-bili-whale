@@ -84,5 +84,33 @@ test("real stdio MCP handshake, schemas, tool calls, failure results, restart an
   );
   assert.equal(cli.status, 0, cli.stderr);
   assert.equal(JSON.parse(cli.stdout).members[0].content, "康德");
+  const configured = await client.callTool({
+    name: "exploration_configure",
+    arguments: {
+      key: "exploration-config",
+      ratios: { deep: 0.5, revisit: 0.3, discover: 0.2 },
+      reason: "配置探索比例",
+    },
+  });
+  assert.equal(configured.isError, undefined);
+  const planned = await client.callTool({
+    name: "exploration_plan",
+    arguments: { seed: "mcp" },
+  });
+  assert.equal(planned.isError, undefined);
+  assert.equal(JSON.parse(planned.content[0].text).path, "discover");
+  const explorationCli = spawnSync(
+    process.execPath,
+    [
+      path.join(root, "tools/bili.mjs"),
+      "concept",
+      "exploration_query",
+      "--json",
+      "{}",
+    ],
+    { env, encoding: "utf8", timeout: 10000 },
+  );
+  assert.equal(explorationCli.status, 0, explorationCli.stderr);
+  assert.equal(JSON.parse(explorationCli.stdout).config.ratios.deep, 0.5);
   await client.close();
 });
