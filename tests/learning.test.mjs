@@ -278,3 +278,31 @@ test('provider delivery receipts require a real admission and an acknowledgement
  assert.equal(receipts[0].data.admission_host_seq,10);assert.equal(receipts[0].data.provider_through_seq,10)
  assert.ok(receipts[0].data.selected_member_ids.length>0)
 })
+
+test('tool-call narration stays in the raw audit but never becomes a learned concept source',async t=>{
+ const store=new ObservationStore(box(t)),ctx=host(),observer=new Observer({store,paths:{}})
+ const learning=createLearningHost({ctx,observer,config:()=>({conceptSystem:{observe:true,learning:true}}),sessionIds:['fish'],start:false})
+ t.after(()=>learning.stop())
+ for(const [i,type] of ['tool-call','tool_use'].entries())await learning.onEvent({id:'fish'},event(i+1,'assistant/message',{message:{source:{kind:'model'},content:[{type:'text',text:'现在记录问题线的进展。'},{type,name:'exploration_progress'}]}}))
+ assert.equal(store.events({type:'learning.enqueued'}).length,0)
+ assert.equal(store.events({type:'learning.source_excluded'}).length,2)
+ await learning.onEvent({id:'fish'},event(3,'assistant/message',{message:{source:{kind:'model'},content:[{type:'text',text:'字幕只展示了原型，长期维护成本仍需要独立证据。'}]}}))
+ assert.equal(store.events({type:'learning.enqueued'}).length,1)
+})
+
+test('a foreground turn defers an in-flight learning evaluation and resumes its saved result while idle',async t=>{
+ const store=new ObservationStore(box(t)),ctx=host(),observer=new Observer({store,paths:{}})
+ let release,started,calls=0;const began=new Promise(r=>started=r),wait=new Promise(r=>release=r)
+ const learning=createLearningHost({ctx,observer,config:()=>({conceptSystem:{observe:true,learning:true}}),sessionIds:['fish'],start:false,evaluate:async()=>{calls++;started();await wait;return result()}})
+ t.after(()=>learning.stop())
+ const item=await learning.worker.queue.enqueue({session_id:'fish',source,route});await learning.worker.queue.ready('fish')
+ const evaluating=learning.worker.wake();await began
+ await learning.onEvent({id:'fish'},event(1,'turn/start',{}));release();await evaluating
+ assert.equal(job(store,item.id).status,'ready');assert.ok(job(store,item.id).evaluation)
+ assert.equal(Object.keys(store.state().concepts?.members??{}).length,0)
+ await learning.worker.wake();assert.equal(calls,1)
+ await learning.onEvent({id:'fish'},event(2,'turn/end',{}));await learning.worker.wake()
+ assert.equal(job(store,item.id).status,'done');assert.equal(calls,1)
+ assert.equal(Object.keys(store.state().concepts.members).length,1)
+ assert.equal(store.events({type:'learning.deferred_until_idle'}).length,1)
+})

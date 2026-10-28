@@ -122,6 +122,13 @@ export class LearningWorker {
           job=await this.queue.update(job,{evaluation},'learning.validated')
         }
         for(const [i,c] of job.evaluation.candidates.entries()) {
+          // A foreground turn may have started while the model evaluated this
+          // job. Keep its validated result and resume after the turn, without
+          // changing the concept state used by an in-flight feed judgment.
+          if(!this.acceptSession(job.session_id)) {
+            await this.queue.update(job,{status:'ready',lease_until:0,available_at:0},'learning.deferred_until_idle')
+            return
+          }
           if(this.stopped||!this.enabled())throw Error('Learning paused')
           // Renew ownership before each idempotent application.
           job=await this.queue.update(job,{lease_until:this.store.now()+90000},'learning.applying')
