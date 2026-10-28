@@ -112,5 +112,14 @@ test("real stdio MCP handshake, schemas, tool calls, failure results, restart an
   );
   assert.equal(explorationCli.status, 0, explorationCli.stderr);
   assert.equal(JSON.parse(explorationCli.stdout).config.ratios.deep, 0.5);
+  assert.equal(tools.tools.find(t=>t.name==='concept_catalog').annotations.readOnlyHint,true);
+  const reviewed=await client.callTool({name:'concept_review',arguments:{key:'catalog-review',candidate_id:JSON.parse(result.content[0].text).id,status:'accepted',reason:'原文提及哲学',collections:[{name:'哲学'}]}});
+  assert.equal(reviewed.isError,undefined);
+  const group=JSON.parse(reviewed.content[0].text).collection_ids[0];
+  const described=await client.callTool({name:'concept_catalog_update',arguments:{key:'catalog-description',collection_id:group,definition:'哲学阅读主题',boundary:'不据提及推断认同',aliases:['哲学阅读'],related:[],source_ids:['u1'],reason:'基于现有概念来源'}});
+  assert.equal(described.isError,undefined);
+  const catalog=await client.callTool({name:'concept_catalog',arguments:{query:'哲学阅读'}});
+  assert.equal(catalog.isError,undefined);
+  assert.equal(JSON.parse(catalog.content[0].text).items[0].id,group);
   await client.close();
 });

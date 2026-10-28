@@ -7,6 +7,8 @@ import { redact } from "./lib/concept-system/store.mjs";
 const engine = new ConceptEngine(),
   server = new McpServer({ name: "bili-whale-concepts", version: "0.1.0" });
 const descriptions = {
+  concept_catalog:'概念群目录索引。可按主体、关键词分页检索；包含定义、归属边界、别名、代表成员及原始来源。先查目录，用群ID归类，缺少定义会显式标记。',
+  concept_catalog_update:'补充概念群的定义、边界、别名和关联群。必须引用本群已有来源并说明理由；不合并、移动或删除成员。',
   exploration_next:'日常自动探索状态机。依次返回搜索规划、候选判断、实际选片、无字幕续找、完整字幕逐页阅读、问题进展，最后 complete/exhausted。始终沿用 cycle_id，不手工伪造阅读状态。',
   video_read_page:'读取指定真实 read_id 的一页完整字幕正文（非简介），按 total_pages 逐页调用；仅原生工具结果实际含完整正文时记录该页，全部读完才计曝光。',
   feed_run: "执行真实只读平台检索与选片流程，固定参数由插件服务运行，不需要会话终端写入学习目录。按 search_plan_required / judgment_required 完成规划和判断后，重复相同参数恢复同一 run-id。不会评论、收藏或发送。",
@@ -26,7 +28,7 @@ const descriptions = {
     "选择后记录实际阅读/观看证据、回答、剩余问题及下一步；只有 engaged/completed 计曝光，不自动奖励。",
   concept_propose:
     "记录携带来源的待评估概念。明确 subject=user 或 fish，提及不等于喜欢。",
-  concept_review: "评估候选并关联集合，保留成员和原始证据；不直接改变人设。",
+  concept_review: "先用concept_catalog查目录；复用群使用collection_id并记录reason，新群使用name与定义/边界。评估候选并关联集合，保留成员和原始证据；不直接改变人设。",
   concept_query: "按主体、场景、用途、状态检索成员和集合。",
   decision_preview:
     "影子决策预演：记录分项分数、疲劳、扰动种子和状态快照；不更新学习状态。探索决策需携带 exploration_plan 的版本、种子、路径以及各选项 target。",
@@ -46,6 +48,7 @@ const descriptions = {
     "显式归档已返回的 DS 正文和可用推理；必须指向已准备提示，不伪造推理。",
 };
 const readonly = new Set([
+  'concept_catalog',
   "exploration_plan",
   "exploration_query",
   "concept_query",

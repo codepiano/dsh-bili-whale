@@ -15,7 +15,7 @@ import {createLearningHost} from '../lib/learning-host.js'
 
 const bv='BV1234567890',route={provider:'fixture',model:'fixture'}
 const packet=(over={})=>({bvid:bv,cid:'123',title:'康德导读',description:'视频简介',duration:90,subtitles:[{from:0,to:4,content:'康德讨论认识的边界。'}],...over})
-const evaluation=()=>({candidates:[{subject:'fish',content:'康德',tags:['topic'],scene:'general',triggers:[],exclusions:[],interpretation:'mention',quote:'康德',status:'accepted',reason:'字幕中出现的话题，不表示认同',collections:['哲学']}]})
+const evaluation=(catalog)=>({candidates:[{subject:'fish',content:'康德',tags:['topic'],scene:'general',triggers:[],exclusions:[],interpretation:'mention',quote:'康德',status:'accepted',reason:'字幕中出现的话题，不表示认同',collections:[catalog?.inventory.find(c=>c.subject==='fish'&&c.name==='哲学') ? {collection_id:catalog.inventory.find(c=>c.subject==='fish'&&c.name==='哲学').id,reason:'复用已有哲学群'} : {name:'哲学',definition:'哲学相关概念',boundary:'不据此推断个人认同',aliases:[],related:[],reason:'来源属于这一主题'}]}]})
 function box(t){const d=fs.mkdtempSync(path.join(os.tmpdir(),'whale-debrief-'));t.after(()=>fs.rmSync(d,{recursive:true,force:true}));return d}
 function setup(t){const store=new ObservationStore(box(t));return {store,reads:new VideoReads(store)}}
 async function capture(reads,over={}){const read=await reads.start(bv);return reads.complete(read.id,packet(over))}
@@ -64,7 +64,7 @@ test('unbound, forged, failed-tool and unrelated-session markers cannot enqueue 
 })
 
 test('repeated shallow/deep content reuses assessed sources; changed subtitles retain provenance and require fresh assessment',async t=>{
-  const {store,reads}=setup(t),worker=new LearningWorker({store,evaluate:async()=>evaluation()})
+  const {store,reads}=setup(t),worker=new LearningWorker({store,evaluate:async job=>evaluation(job.catalog)})
   const first=await capture(reads);await reads.acceptOutput(first.marker,{session_id:'fish',route});await worker.queue.ready('fish');await worker.wake()
   const state=hash(store.state()),second=await capture(reads,{artifacts:{sheet:'/fixture/sheet.jpg'}})
   await reads.acceptOutput(second.marker,{session_id:'fish',route})

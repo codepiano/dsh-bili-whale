@@ -15,7 +15,7 @@ function box(t) {
 }
 const route={provider:'test',model:'fixture'}
 const source={id:'user-1',actor:'user',type:'conversation',excerpt:'最近想读康德，也常说慢慢来。',ref:'test:1'}
-const result=()=>({candidates:[{subject:'user',content:'康德',tags:['topic'],scene:'general',triggers:[],exclusions:[],interpretation:'mention',quote:'康德',status:'accepted',reason:'提及阅读方向，不推断认同',collections:['哲学阅读']}]})
+const result=()=>({candidates:[{subject:'user',content:'康德',tags:['topic'],scene:'general',triggers:[],exclusions:[],interpretation:'mention',quote:'康德',status:'accepted',reason:'提及阅读方向，不推断认同',collections:[{name:'哲学阅读',definition:'哲学阅读相关概念',boundary:'不据此推断个人认同',aliases:[],related:[],reason:'来源属于这一主题'}]}]})
 const event=(seq,type,data)=>({seq,type,data,time:Date.now()})
 function host() {
   const hooks=new Map()
@@ -94,7 +94,7 @@ test('evidence rules reject invented quotes, source swaps, ungrounded beliefs an
   for(const patch of [{quote:'不存在的词'},{subject:'fish'},{tags:['belief']},{interpretation:'negated'},{extra:'hidden'},{collections:[]}]) {
     const r=result();Object.assign(r.candidates[0],patch);assert.throws(()=>validateEvaluation(r,source))
   }
-  const imitation=result();Object.assign(imitation.candidates[0],{subject:'fish',content:'慢慢来',quote:'慢慢来',tags:['phrase'],collections:['日常表达']})
+  const imitation=result();Object.assign(imitation.candidates[0],{subject:'fish',content:'慢慢来',quote:'慢慢来',tags:['phrase'],collections:[{name:'日常表达',definition:'日常表达相关概念',boundary:'不据此推断个人认同',aliases:[],related:[],reason:'来源属于这一主题'}]})
   assert.equal(validateEvaluation(imitation,source).candidates[0].subject,'fish')
 })
 
@@ -183,7 +183,7 @@ test('pending jobs follow the current route while completed-turn jobs retain the
 
 test('actual fish speech enters learning separately, and newly learned fish material appears on the next step',async t=>{
   const store=new ObservationStore(box(t)),ctx=host(),observer=new Observer({store,paths:{}})
-  const r=result();Object.assign(r.candidates[0],{subject:'fish',content:'慢慢来',quote:'慢慢来',tags:['phrase'],collections:['日常表达']})
+  const r=result();Object.assign(r.candidates[0],{subject:'fish',content:'慢慢来',quote:'慢慢来',tags:['phrase'],collections:[{name:'日常表达',definition:'日常表达相关概念',boundary:'不据此推断个人认同',aliases:[],related:[],reason:'来源属于这一主题'}]})
   const learning=createLearningHost({ctx,observer,config:()=>({conceptSystem:{observe:true,learning:true,mode:'active',renderBudget:400}}),sessionIds:['fish'],start:false,evaluate:async()=>r})
   const step=ctx.hooks.get('agent/pre-step')[0],args={agent:{session:{id:'fish'}}},next=()=>({kind:'continue',messages:[]})
   assert.equal((await assemble(ctx)).contexts.length,0)

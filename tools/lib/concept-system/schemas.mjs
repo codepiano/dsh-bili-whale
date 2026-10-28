@@ -52,7 +52,19 @@ const target = z
     candidate_id: id.optional(),
   })
   .strict();
+export const collectionMetadata = {
+  definition:z.string().trim().min(1).max(600),
+  boundary:z.string().trim().min(1).max(600),
+  aliases:z.array(z.string().trim().min(1).max(100)).max(12).default([]),
+  related:z.array(id).max(20).default([]),
+};
+export const collectionPlacement = z.union([
+  z.object({collection_id:id,reason:z.string().trim().min(1).max(1000)}).strict(),
+  z.object({name:z.string().trim().min(1).max(100),...collectionMetadata,reason:z.string().trim().min(1).max(1000)}).strict(),
+]);
 export const schemas = {
+  concept_catalog:z.object({subject:subject.optional(),query:z.string().max(300).default(''),page:z.number().int().min(1).max(100000).default(1),limit:z.number().int().min(1).max(100).default(20)}).strict(),
+  concept_catalog_update:z.object({key,...links,collection_id:id,...collectionMetadata,source_ids:z.array(id).min(1).max(20),reason:text}).strict(),
   exploration_next:z.object({cycle_id:id.refine(v=>v.length<=80,'Cycle id too long')}).strict(),
   video_read_page:z.object({read_id:id,page:z.number().int().min(1).max(24)}).strict(),
   feed_run: z.object({run_id:id,seed:key.optional(),n:z.number().int().min(1).max(20).default(1),per:z.number().int().min(1).max(20).default(2),pool:z.number().int().min(1).max(200).default(20),source:z.enum(['search','popular','rank','following','all']).default('search')}).strict(),
@@ -194,10 +206,15 @@ export const schemas = {
         .array(
           z
             .object({
-              name: z.string().trim().min(1).max(100),
+              name: z.string().trim().min(1).max(100).optional(),
+              collection_id:id.optional(),
+              reason:z.string().trim().min(1).max(1000).optional(),
+              definition:collectionMetadata.definition.optional(),
+              boundary:collectionMetadata.boundary.optional(),
+              aliases:collectionMetadata.aliases.optional(),
               related: z.array(id).max(20).default([]),
             })
-            .strict(),
+            .strict().refine(v=>!!v.name!==!!v.collection_id,'Use a collection_id or a new name').refine(v=>!!v.definition===!!v.boundary,'Definition and boundary must be supplied together'),
         )
         .max(10)
         .default([]),

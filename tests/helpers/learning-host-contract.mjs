@@ -21,7 +21,7 @@ const store=new ObservationStore(root),observer=new Observer({store,paths:{}})
 const config={conceptSystem:{observe:true,learning:true,mode:'active',renderBudget:400}}
 const learning=createLearningHost({ctx,observer,config:()=>config,sessionIds:['fish'],start:false,evaluate:async job=>({candidates:[{
   subject:job.source.type==='video'?'fish':'user',content:'康德 {{literal}}',tags:['topic'],scene:'general',triggers:[],exclusions:[],interpretation:'mention',
-  quote:'康德',status:'accepted',reason:'原文提及',collections:['哲学阅读'],
+  quote:'康德',status:'accepted',reason:'原文提及',collections:[{name:'哲学阅读',definition:'哲学阅读相关概念',boundary:'不据此推断个人认同',aliases:[],related:[],reason:'来源属于这一主题'}],
 }]})})
 let events=attachSessionEvents(ctx,observer,'fish',{onEvent:learning.onEvent})
 try {

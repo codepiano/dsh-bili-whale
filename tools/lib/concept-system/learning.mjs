@@ -1,7 +1,8 @@
 import crypto from 'node:crypto'
 import { z } from 'zod'
 import { ConceptEngine } from './engine.mjs'
-import { schemas } from './schemas.mjs'
+import { schemas, collectionPlacement } from './schemas.mjs'
+import { learningCatalog, catalogName } from './catalog.mjs'
 import { hash, redact } from './store.mjs'
 import { settleReadsForJob } from './video-state.mjs'
 
@@ -10,19 +11,34 @@ const candidate = schemas.concept_propose.omit({key:true,source:true,trace_id:tr
   content:z.string().trim().min(1).max(600),
   status:z.enum(['accepted','deferred','rejected']),
   reason:z.string().trim().min(1).max(1000),
-  collections:z.array(z.string().trim().min(1).max(100)).max(3),
+  // Strings are retained only for replaying historical validated jobs.
+  collections:z.array(z.union([z.string().trim().min(1).max(100),collectionPlacement])).max(3),
 }).strict()
 export const evaluationSchema = z.object({candidates:z.array(candidate).max(6)}).strict()
 const expressionTags = new Set(['word','phrase','idiom','sentence_pattern'])
 
-// No model-authored IDs, sources, rewards, file writes or tool calls are accepted.
-export function validateEvaluation(raw, source) {
+// Only existing directory IDs may be referenced; new IDs, sources, rewards,
+// file writes and tool calls are never accepted from the evaluator.
+export function validateEvaluation(raw, source, catalog=null) {
   const parsed = evaluationSchema.parse(raw)
   const video=source.actor==='third_party'&&source.type==='video'&&source.video
   for (const c of parsed.candidates) {
     if (!source.excerpt.includes(c.quote)) throw Error('Evaluation quote is not in source')
     if (c.status === 'accepted' && !c.collections.length) throw Error('Accepted candidate needs a collection')
     if (c.status !== 'accepted' && c.collections.length) throw Error('Only accepted candidates can join collections')
+    if(catalog)for(const placement of c.collections) {
+      if(typeof placement==='string')throw Error('Catalog routing requires an existing collection_id or documented new group')
+      if(placement.collection_id) {
+        const existing=catalog.inventory.find(row=>row.id===placement.collection_id)
+        if(!existing||existing.subject!==c.subject)throw Error('Placement must reference a visible collection of the same subject')
+      } else {
+        if(catalog.truncated)throw Error('Incomplete catalog: defer new groups until the directory is fully checked')
+        const requested=[placement.name,...placement.aliases].map(catalogName)
+        if(catalog.inventory.some(row=>row.subject===c.subject&&[row.name,...row.aliases].some(name=>requested.includes(catalogName(name)))))
+          throw Error('Existing collection name/alias: use its collection_id')
+        if(placement.related.some(id=>!catalog.inventory.some(row=>row.id===id&&row.subject===c.subject)))throw Error('Related collection is outside the visible subject catalog')
+      }
+    }
     if (video && (c.subject!=='fish'||!c.tags.every(t=>t==='topic'||expressionTags.has(t))||!['mention','quoted','uncertain','negated'].includes(c.interpretation)))
       throw Error('Video evidence may only form third-party topic/expression exposure, not personal endorsement')
     if (!video && c.subject !== source.actor && !(source.actor === 'user' && c.subject === 'fish' && c.tags.every(t=>expressionTags.has(t))))
@@ -113,12 +129,15 @@ export class LearningWorker {
       let job=await this.queue.claim(this.acceptSession);if(!job)break
       try {
         if(!job.evaluation) {
-          const request=this.store.object({source:job.source,route:job.route,policy:'learning-v1'})
+          // Persist the exact directory offered to the evaluator. A retry uses
+          // the same routing context; application still checks current identity.
+          if(!job.catalog)job=await this.queue.update(job,{catalog:learningCatalog(this.store.state().concepts??{},job.source)},'learning.catalog_prepared')
+          const request=this.store.object({source:job.source,route:job.route,catalog:job.catalog,previous_error:job.error??null,policy:'learning-catalog-v1'})
           await this.store.event('learning.request',{job_id:job.id,request},{session_id:job.session_id,trace_id:job.trace_id})
           const response=await this.evaluate(job,this.abort.signal)
           const evidence=this.store.object(response)
           await this.store.event('learning.response',{job_id:job.id,object:evidence},{session_id:job.session_id,trace_id:job.trace_id})
-          const evaluation=validateEvaluation(typeof response.text==='string'?JSON.parse(response.text):response,job.source)
+          const evaluation=validateEvaluation(typeof response.text==='string'?JSON.parse(response.text):response,job.source,job.catalog)
           job=await this.queue.update(job,{evaluation},'learning.validated')
         }
         for(const [i,c] of job.evaluation.candidates.entries()) {
@@ -135,7 +154,7 @@ export class LearningWorker {
           const {quote,status,reason,collections,...proposal}=c
           const key=`${job.id}:${i}`,links=job.trace_id?{trace_id:job.trace_id}:{}
           const m=await this.engine.call('concept_propose',{...proposal,...links,key,source:job.source})
-          await this.engine.call('concept_review',{...links,key,candidate_id:m.id,status,reason,collections:collections.map(name=>({name}))})
+          await this.engine.call('concept_review',{...links,key,candidate_id:m.id,status,reason,collections:collections.map(p=>typeof p==='string'?{name:p}:p)})
         }
         await this.queue.update(job,{status:'done',lease_until:0},'learning.completed')
       } catch(e) {

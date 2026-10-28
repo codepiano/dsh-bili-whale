@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { ObservationStore, hash, stable, redact } from "./store.mjs";
 import { schemas } from "./schemas.mjs";
 import { Observer } from "./observation.mjs";
+import { catalogQuery, matchingCollections, applyCatalogMetadata } from './catalog.mjs';
 import {
   explorationPlan,
   explorationQuery,
@@ -259,6 +260,7 @@ export class ConceptEngine {
         input,
       );
     if (name === "concept_query") return this.query(input);
+    if (name === 'concept_catalog') return catalogQuery(get({state:this.store.state()}),input);
     if (name === "trace_get") return this.store.events(input);
     if (name === "version_list") return this.store.versions(input.role);
     if (name === "version_diff")
@@ -283,6 +285,11 @@ export class ConceptEngine {
             emit,
             links(input),
           );
+        } else if (name === 'concept_catalog_update') {
+          const c=own(state.collections,input.collection_id);
+          if(!c)throw Error('Unknown collection');
+          result=applyCatalogMetadata(state,c,input,{source_ids:input.source_ids,reason:input.reason,at:now});
+          emit('collection.catalog_updated',{collection_id:c.id,metadata_evidence:c.metadata_evidence},links(input));
         } else if (name === "concept_propose") {
           const existing = own(state.sources, input.source.id);
           if (existing && stable(existing) !== stable(input.source))
@@ -321,7 +328,12 @@ export class ConceptEngine {
               )
             )
               throw Error("Related collection subject mismatch");
-            const id = "group-" + hash([m.subject, spec.name]).slice(0, 24);
+            const matches=spec.collection_id?[]:matchingCollections(state,m.subject,spec.name);
+            if(matches.length>1)throw Error('Ambiguous collection name; use collection_id');
+            const existing=spec.collection_id?own(state.collections,spec.collection_id):matches[0];
+            if(spec.collection_id&&!existing)throw Error('Unknown collection');
+            if(existing&&existing.subject!==m.subject)throw Error('Collection subject mismatch');
+            const id = existing?.id ?? 'group-' + hash([m.subject, spec.name]).slice(0, 24);
             const c = (state.collections[id] ??= {
               id,
               name: spec.name,
@@ -336,6 +348,8 @@ export class ConceptEngine {
             });
             if (!c.members.includes(m.id)) c.members.push(m.id);
             c.related = [...new Set([...c.related, ...spec.related])];
+            if(spec.definition&&!existing)applyCatalogMetadata(state,c,spec,{source_ids:[m.source_id],reason:spec.reason??input.reason,at:now});
+            emit('collection.placement_decided',{candidate_id:m.id,collection_id:id,action:existing?'join':'create',reason:spec.reason??input.reason,source_id:m.source_id},links(input));
             ids.push(id);
             const count = c.members.filter(
               (id) => state.members[id]?.status === "accepted" || id === m.id,
