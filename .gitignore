@@ -37,3 +37,6 @@ Thumbs.db
 
 # 本地观察页面构建产物
 tools/observer-ui/dist/
+
+# Private cloud speech requests may contain signed media URLs.
+speech-tasks/

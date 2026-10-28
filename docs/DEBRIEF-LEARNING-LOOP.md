@@ -1,6 +1,6 @@
 # debrief 的读取回执与学习回流
 
-当前日常读取已切为[字幕优先与按需补充](SUBTITLE-FIRST-READING.md)：默认只取元信息/字幕，缺字幕时尝试本地音轨转写；context、画面均显式按需。下文旧 subtitle 专属表述的正文交付门槛同样适用于 audio_transcript，转写保留独立来源类型。
+当前日常读取已切为[字幕优先与按需补充](SUBTITLE-FIRST-READING.md)：默认只取元信息/字幕，缺字幕时尝试speech 服务云端转写；context、画面均显式按需。下文旧 subtitle 专属表述的正文交付门槛同样适用于 audio_transcript，转写保留独立来源类型。
 
 本阶段连接 `feed → debrief 材料 → 会话接收 → 回合后评估 → 概念群 → 下一轮 feed`。记录可验证的材料取得和概念评估，不把脚本取回字幕、备好图片等同于模型看完或看懂整条视频。
 

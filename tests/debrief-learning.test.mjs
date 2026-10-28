@@ -223,23 +223,23 @@ test('default CLI fetches only metadata and subtitles, preferring human zh-CN ov
   assert.equal(material.components.cover,'skipped');assert.equal(material.components.audio,'skipped')
 })
 
-test('CLI local audio fallback retains distinct provenance and never contacts context endpoints',async t=>{
-  const home=box(t),model=path.join(home,'ggml-fixture.bin'),bin=path.join(home,'fixture-media')
-  fs.writeFileSync(model,'fixture model');fs.writeFileSync(bin,'#!'+process.execPath+'\n'+`
-    import fs from 'node:fs';
-    const args=process.argv.slice(2),out=args[args.indexOf('-of')+1];
-    if(args.includes('-oj'))fs.writeFileSync(out+'.json',JSON.stringify({transcription:[{offsets:{from:0,to:4000},text:'康德讨论认识的边界。'}]}));
-    else fs.writeFileSync(args.at(-1),'fixture wav');
-  `,{mode:0o700})
-  const s=cliBox(t,{no_subtitles:true,reading:{audio:{model,executable:bin}}});s.env.FFMPEG=bin
+test('CLI stages audio for cloud speech without launching local ASR',async t=>{
+  const speech={baseUrl:'http://127.0.0.1:4325/api/',provider:'doubao'}
+  const s=cliBox(t,{no_subtitles:true,reading:{audio:speech}});s.env.BILI_SPEECH_TOKEN='fixture-speech-token'
+  s.env.FFMPEG='/not-allowed/ffmpeg';s.env.BILI_WHISPER_BIN='/not-allowed/whisper'
   const r=s.run();assert.equal(r.status,0,r.stderr)
-  const id=r.stdout.match(/BILI_DEBRIEF_RECEIPT:([^:]+):/)[1],store=new ObservationStore(s.concept),reads=new VideoReads(store),row=await reads.get(id)
-  assert.equal(row.kind,'audio_transcript',r.stdout+r.stderr)
-  const material=store.getObject(row.material.hash).content
-  assert.equal(material.transcription.engine,'whisper.cpp');assert.equal(material.transcription.audio_hash,hash('fixture audio'))
-  assert.equal(material.sources[0].video.section,'audio_transcript');assert.match(material.text,/康德/)
-  const urls=fs.readFileSync(s.requests,'utf8');assert.match(urls,/playurl/);assert.doesNotMatch(urls,/cover|comment|reply/)
-  const never=cliBox(t,{no_subtitles:true,reading:{audio:{model,executable:bin}}});never.env.FFMPEG=bin
+  const id=r.stdout.match(/BILI_AUDIO_PENDING:([^\s]+)/)?.[1];assert.ok(id,r.stdout)
+  assert.doesNotMatch(r.stdout,/BILI_DEBRIEF_RECEIPT/)
+  const store=new ObservationStore(s.concept),row=await new VideoReads(store).get(id)
+  assert.equal(row.status,'audio_pending');assert.equal(row.kind,'none')
+  const requests=fs.readFileSync(s.requests,'utf8').trim().split('\n').map(JSON.parse)
+  assert.ok(requests.some(r=>r.url.endsWith('/api/transcriptions')&&r.method==='POST'))
+  assert.equal(requests.filter(r=>new URL(r.url).hostname==='fixture.bilivideo.com').length,1,'local host only transfers compressed audio to managed staging')
+  assert.ok(requests.some(r=>r.url.endsWith('/api/audio-uploads')))
+  assert.ok(requests.some(r=>r.url.startsWith('https://fixture.tos-cn-beijing.volces.com/')))
+  assert.ok(!requests.some(r=>/cover|comment|reply/.test(r.url)))
+  assert.equal(store.events({type:'learning.enqueued'}).length,0)
+  const never=cliBox(t,{no_subtitles:true,reading:{audio:speech}});never.env.BILI_SPEECH_TOKEN='fixture-speech-token'
   assert.equal(never.run(['--audio','never']).status,0)
-  assert.doesNotMatch(fs.readFileSync(never.requests,'utf8'),/playurl/)
+  assert.doesNotMatch(fs.readFileSync(never.requests,'utf8'),/playurl|transcriptions/)
 })

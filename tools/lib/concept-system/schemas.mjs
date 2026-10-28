@@ -27,7 +27,7 @@ const source = z
         part: z.number().int().min(1).max(24),
         parts: z.number().int().min(1).max(24),
         content_hash: z.string().regex(/^[a-f0-9]{64}$/),
-        transcription:z.object({engine:z.literal('whisper.cpp'),model:z.string().min(1).max(200),model_hash:z.string().regex(/^[a-f0-9]{64}$/),audio_hash:z.string().regex(/^[a-f0-9]{64}$/),chunk_seconds:z.number().positive()}).strict().optional(),
+        transcription:z.union([z.object({engine:z.literal('whisper.cpp'),model:z.string().min(1).max(200),model_hash:z.string().regex(/^[a-f0-9]{64}$/),audio_hash:z.string().regex(/^[a-f0-9]{64}$/),chunk_seconds:z.number().positive()}).strict(),z.object({engine:z.literal('common-mcp-speech'),provider:z.string().min(1).max(64),task_id:z.string().uuid(),resource_id:z.string().min(1).max(200),audio_url_hash:z.string().regex(/^[a-f0-9]{64}$/).optional(),audio_hash:z.string().regex(/^[a-f0-9]{64}$/).optional(),upload_id:z.string().uuid().optional()}).strict().refine(v=>!!v.audio_hash||!!v.audio_url_hash,'Transcription requires an input digest')]).optional(),
       })
       .strict()
       .optional(),
@@ -70,6 +70,7 @@ export const schemas = {
   concept_catalog:z.object({subject:subject.optional(),query:z.string().max(300).default(''),page:z.number().int().min(1).max(100000).default(1),limit:z.number().int().min(1).max(100).default(20)}).strict(),
   concept_catalog_update:z.object({key,...links,collection_id:id,...collectionMetadata,source_ids:z.array(id).min(1).max(20),reason:text}).strict(),
   exploration_next:z.object({cycle_id:id.refine(v=>v.length<=80,'Cycle id too long')}).strict(),
+  video_audio_status:z.object({read_id:id}).strict(),
   video_read_frames:z.object({read_id:id,times:z.array(z.number().finite().min(0)).min(1).max(6),reason:text}).strict(),
   video_read_page:z.object({read_id:id,page:z.number().int().min(1).max(24)}).strict(),
   feed_run: z.object({run_id:id,seed:key.optional(),n:z.number().int().min(1).max(20).default(1),per:z.number().int().min(1).max(20).default(2),pool:z.number().int().min(1).max(200).default(20),source:z.enum(['search','popular','rank','following','all']).default('search')}).strict(),

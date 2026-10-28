@@ -8,7 +8,7 @@ import {promisify} from 'node:util'
 import {apiGet} from './bili-api.mjs'
 import {credentialsPath,dshPath} from './paths.mjs'
 import {requireFfmpeg} from './ffmpeg.mjs'
-import {downloadMedia,fileHash} from './video-audio.mjs'
+import {downloadMedia,fileHash} from './media-files.mjs'
 const run=promisify(execFile)
 export async function readVideoFrames(store,{read_id,times,reason},{signal,jget=apiGet,download=downloadMedia,execute=run}={}) {
   const read=await store.transaction({state:false},d=>d.reads.get(read_id))

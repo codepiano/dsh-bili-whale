@@ -58,7 +58,7 @@ export class VideoReads {
     const sources=material.sources.map(source=>({id:source.id,object:this.store.object(source)}))
     return this.store.transaction({state:false,key:'video-complete:'+id,input:object.hash},(d,emit)=>{
       const read=d.reads.get(id)
-      if(!read||read.status!=='started'||read.bvid!==material.bvid)throw Error('Invalid video read completion')
+      if(!read||!['started','audio_pending'].includes(read.status)||read.bvid!==material.bvid)throw Error('Invalid video read completion')
       const next={...read,kind:material.kind,status:'acquired',cid:material.cid,material:object,sources,
         content_hash:material.content_hash,coverage:material.coverage,completed_at:new Date(this.store.now()).toISOString(),parts_assessed:0}
       d.reads.put(next)
@@ -66,10 +66,19 @@ export class VideoReads {
       return {id,material_hash:object.hash,kind:material.kind,marker:`BILI_DEBRIEF_RECEIPT:${id}:${object.hash}`}
     })
   }
+  deferAudio(id,packet,speech) {
+    const draft=this.store.object(packet)
+    return this.store.transaction({state:false},(d,emit)=>{
+      const read=d.reads.get(id)
+      if(!read||read.status!=='started')throw Error('Invalid audio reading attempt')
+      d.reads.put({...read,status:'audio_pending',audio_draft:draft,speech})
+      emit('video.audio_pending',{read_id:id,bvid:read.bvid,speech,scope:'remote_task_not_read_completion'},{decision_id:read.feed?.decision_id??null,trace_id:read.feed?.trace_id??null})
+    })
+  }
   fail(id,error) {
     return this.store.transaction({state:false},(d,emit)=>{
       const read=d.reads.get(id)
-      if(!read||read.status!=='started')return
+      if(!read||!['started','audio_pending'].includes(read.status))return
       d.reads.put({...read,status:'failed',error:redact(String(error?.message??error))})
       emit('video.read_failed',{read_id:id,bvid:read.bvid,error:redact(String(error?.message??error))},{trace_id:read.feed?.trace_id??null,decision_id:read.feed?.decision_id??null})
     })

@@ -1,6 +1,6 @@
 import { guardedFetch as fetch } from '../lib/traffic.mjs'
 import { apiGet } from '../lib/bili-api.mjs'
-// 字幕优先；缺字幕时本地音频转写。--context 才取封面/弹幕/热评，--frames 才走旧九宫格。
+// 字幕优先；缺字幕时经 speech 服务云端转写。--context 才取封面/弹幕/热评，--frames 才走旧九宫格。
 //
 // 用法: node debrief.mjs <BV> [--audio auto|never|always] [--context] [--frames] [--feed-run-id 本轮ID]
 // 产出: 终端摘要 + 封面图 + 字幕 TXT + 弹幕对齐表 + 九宫格/字幕带（后三者交给 read_image / 模型合成）
@@ -162,9 +162,9 @@ if(audioMode==='always'||(audioMode==='auto'&&!body.length&&components.subtitles
     transcript=await transcribeVideoAudio({bvid,cid,duration:dur,headers:H,jget,settings:config().reading?.audio,signal:mediaAbort.signal})
     if(audioMode==='always'&&transcript.status==='success')transcript.force=true
     components.audio=transcript.status
-    if(transcript.status==='success')console.log('本地音频转写已取得：'+transcript.rows.length+' 段；通过 video_read_page 实际读取正文。')
+    if(transcript.status==='success')console.log('云端音频转写已取得：'+transcript.rows.length+' 段；通过 video_read_page 实际读取正文。')
     else console.log('音频转写未取得：'+transcript.reason)
-  } catch(e) {components.audio='failed';console.log('本地转写失败：'+redact(String(e.message)))}
+  } catch(e) {components.audio='failed';console.log('语音服务调用失败：'+redact(String(e.message)))}
 }
 
 const subAt = (t) => {
@@ -328,8 +328,15 @@ if (opt.score) {
 console.log('\n══════════ 下一步（交给模型）══════════')
 console.log('先用 video_read_page 读取实际字幕/转写正文；有视觉疑问再用 video_read_frames 按时间点补图，需要观众反应时再加 --context。材料取得不等于读完或看懂。')
 
+const packet={bvid,cid,title:d.title,description:d.desc??'',duration:dur,subtitles:body,track,transcript:transcript?.status==='success'?transcript:null,components,artifacts}
+if(transcript?.status==='pending') {
+  if(tracker)await tracker.deferAudio(attempt.id,packet,transcript.speech)
+  console.log('云端语音任务待完成；稍后查询同一任务，不重交、不在本机转写。')
+  process.stdout.write('BILI_AUDIO_PENDING:'+(attempt?.id??transcript.speech.key)+'\n')
+  return
+}
 if(tracker) {
-  const receipt=await tracker.complete(attempt.id,{bvid,cid,title:d.title,description:d.desc??'',duration:dur,subtitles:body,track,transcript:transcript?.status==='success'?transcript:null,components,artifacts})
+  const receipt=await tracker.complete(attempt.id,packet)
   console.log('本地材料回执：'+receipt.kind+'；素材取得不代表视频已看完。')
   // The receipt contains only a random local ID and content hash. Keep it intact
   // even when the presentation layer masks owner names/numeric IDs in text.

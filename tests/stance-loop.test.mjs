@@ -566,7 +566,7 @@ test('automatic exploration bounds empty rounds, preserves exhaustion, and disab
  const before=hash(store.state());assert.equal((await nextExploration(store,{cycle_id:'off'},{...options,readConfig:()=>({conceptSystem:{observe:false}})})).status,'disabled');assert.equal(hash(store.state()),before)
  await store.transaction({key:'feed-select:stale-r1',input:'selected'},()=>({mode:'shadow',selected:[videos[0]]}))
  const reads=new VideoReads(store),stale=await reads.start(videos[0].bv,{feed_run_id:'stale-r1'})
- await store.transaction({state:false},d=>{const r=d.reads.get(stale.id);d.reads.put({...r,started_at:new Date(Date.now()-1860001).toISOString()})})
+ await store.transaction({state:false},d=>{const r=d.reads.get(stale.id);d.reads.put({...r,started_at:new Date(Date.now()-480001).toISOString()})})
  const continued=await nextExploration(store,{cycle_id:'stale'},{...options,feed:async()=>({status:'selected',selected:[videos[0]]})})
  assert.equal(continued.round,2);assert.equal(continued.next_action,'debrief_read');assert.equal((await reads.get(stale.id)).status,'failed')
 })

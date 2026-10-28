@@ -13,11 +13,12 @@ const descriptions = {
   persona_revision_rollback:'将指定修订恢复到修改前；必须携带当前文件 expected_hash 和理由。保留新回滚版本与原历史，拒绝覆盖未知外部修改。',
   concept_catalog:'概念群目录索引。可按主体、关键词分页检索；包含定义、归属边界、别名、代表成员及原始来源。先查目录，用群ID归类，缺少定义会显式标记。',
   concept_catalog_update:'补充概念群的定义、边界、别名和关联群。必须引用本群已有来源并说明理由；不合并、移动或删除成员。',
-  exploration_next:'日常自动探索状态机。依次返回搜索规划、候选判断、实际选片、字幕优先、缺字幕本地音频转写、完整正文逐页阅读、问题进展，最后 complete/exhausted。始终沿用 cycle_id，不手工伪造阅读状态。',
+  exploration_next:'日常自动探索状态机。依次返回搜索规划、候选判断、实际选片、字幕优先、缺字幕云端音频转写、完整正文逐页阅读、问题进展，最后 complete/exhausted。始终沿用 cycle_id，不手工伪造阅读状态。',
+  video_audio_status:'查询 read_id 已关联的云端语音任务；pending 时至少30秒后再查或下次作息继续，不重交。不把任务受理当已读，完成后仍须 video_read_page 实际交付正文。',
   video_read_frames:'仅在画面信息确有必要时补充指定 read_id 的 1–6 个时间点截图并直接返回图片；需写 reason。记录 BV/CID、时间、图片哈希和原阅读关联，生成图片不等于已看懂全片。',
-  video_read_page:'读取指定真实 read_id 的一页完整字幕或本地音频转写正文（非简介），按 total_pages 逐页调用；仅原生工具结果实际含完整正文时记录该页，全部读完才计曝光。',
+  video_read_page:'读取指定真实 read_id 的一页完整字幕或云端音频转写正文（非简介），按 total_pages 逐页调用；仅原生工具结果实际含完整正文时记录该页，全部读完才计曝光。',
   feed_run: "执行真实只读平台检索与选片流程，固定参数由插件服务运行，不需要会话终端写入学习目录。按 search_plan_required / judgment_required 完成规划和判断后，重复相同参数恢复同一 run-id。不会评论、收藏或发送。",
-  debrief_read: "字幕优先读取已选视频并返回物料回执；缺字幕时用已有本地 whisper 转写音轨。audio=always 用于核实口述，never 禁用转写；context=true 才补封面/弹幕/热评。画面另用 video_read_frames；无任意命令或路径参数。",
+  debrief_read: "字幕优先读取已选视频并返回物料回执；缺字幕时调用 common-mcp speech HTTP 服务云端转写，不使用本地模型。audio=always 用于核实口述，never 禁用转写；context=true 才补封面/弹幕/热评。画面另用 video_read_frames；无任意命令或路径参数。",
   feed_search_plan:
     "为 feed 的 search_plan_required 阶段提出符合程序所选探索路径的查询词和理由；不修改概念标签。随后恢复原 run-id 真实检索。",
   feed_assess:
@@ -73,7 +74,7 @@ for (const [name, inputSchema] of Object.entries(schemas))
       annotations: {
         readOnlyHint: readonly.has(name),
         destructiveHint: false,
-        openWorldHint: ["feed_run","debrief_read","video_read_frames","exploration_next"].includes(name),
+        openWorldHint: ["feed_run","debrief_read","video_audio_status","video_read_frames","exploration_next"].includes(name),
       },
     },
     async (args, extra) => {

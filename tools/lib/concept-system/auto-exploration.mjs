@@ -9,6 +9,10 @@ export async function nextExploration(store,{cycle_id},{signal,feed=runFeed,read
   signal?.throwIfAborted()
   const cfgNow=readConfig()
   if(cfgNow.conceptSystem?.observe!==true||cfgNow.conceptSystem?.mode!=='active')return {status:'disabled',next_action:'legacy_feed',reason:'自动概念探索仅在 observe=true 且 active 时启用'}
+  // A later scheduled wake resumes its unfinished paid task instead of selecting
+  // another video and submitting another transcription.
+  const prior=Object.values(store.state().auto_exploration_cycles??{}).find(c=>c.status==='active'&&store.journal.use(db=>!!db.prepare("SELECT id FROM video_reads WHERE status!='failed' AND json_extract(payload,'$.audio_draft.hash') IS NOT NULL AND json_extract(payload,'$.feed.run_id')=? LIMIT 1").get(`${c.id}-r${c.round}`)))
+  if(prior&&prior.id!==cycle_id)return nextExploration(store,{cycle_id:prior.id},{signal,feed,readConfig})
   let cycle=await store.transaction({},(d,emit)=>{
     d.state.auto_exploration_cycles??={}
     if(d.state.auto_exploration_cycles[cycle_id])return d.state.auto_exploration_cycles[cycle_id]
@@ -47,13 +51,15 @@ export async function nextExploration(store,{cycle_id},{signal,feed=runFeed,read
   const rows=store.journal.use(db=>db.prepare("SELECT payload FROM video_reads WHERE json_extract(payload,'$.feed.run_id')=? ORDER BY rowid DESC").all(run_id).map(r=>JSON.parse(r.payload)))
   for(const video of slate.selected??[]) {
     const read=rows.find(r=>r.bvid===video.bv)
-    if(!read)return {...envelope,status:'reading_required',next_action:'debrief_read',arguments:{bvid:video.bv,feed_run_id:run_id},reason:'字幕优先；缺字幕时尝试本地音频转写，仍无正文再继续其他材料，不计曝光'}
+    if(!read)return {...envelope,status:'reading_required',next_action:'debrief_read',arguments:{bvid:video.bv,feed_run_id:run_id},reason:'字幕优先；缺字幕时尝试speech 服务云端音频转写，仍无正文再继续其他材料，不计曝光'}
+    if(read.status==='audio_pending')return {...envelope,status:'audio_pending',next_action:'video_audio_status',arguments:{read_id:read.id},retry_after_seconds:30,instructions:'查询同一语音任务，不重新提交；pending 时至少30秒后再查，可结束本回合等下一次作息恢复。不得运行本地语音模型。'}
     if(read.status==='started') {
-      if(store.now()-Date.parse(read.started_at)<1860000)return {...envelope,status:'read_in_progress',next_action:'wait',read_id:read.id}
+      if(store.now()-Date.parse(read.started_at)<480000)return {...envelope,status:'read_in_progress',next_action:'wait',read_id:read.id}
       await new VideoReads(store).fail(read.id,Error('Fixed debrief acquisition deadline expired; continue other material'))
       continue
     }
     if(!isVideoTextKind(read.kind)||read.status==='failed'||read.coverage?.truncated)continue
+    if(!read.session_id&&read.audio_draft)return {...envelope,status:'awaiting_host_receipt',next_action:'video_audio_status',arguments:{read_id:read.id},reason:'重发原云端任务的已取得回执，不重新提交'}
     if(!read.session_id)return {...envelope,status:'awaiting_host_receipt',next_action:'wait',read_id:read.id}
     if(!read.reading_complete) {
       if(read.body_complete)return {...envelope,status:'awaiting_model_delivery',next_action:'wait',read_id:read.id,reason:'等待正常模型提供方接收确认，不提前计曝光'}
@@ -61,7 +67,7 @@ export async function nextExploration(store,{cycle_id},{signal,feed=runFeed,read
       return {...envelope,status:'body_required',next_action:'video_read_page',arguments:{read_id:read.id,page},total_pages:read.sources.length,coverage:read.coverage}
     }
     const decision=store.state().concepts?.decisions[read.feed.decision_id],progress=decision?.exploration?.progress
-    if(!progress)return {...envelope,status:'progress_required',next_action:'exploration_progress',decision_id:read.feed.decision_id,read_id:read.id,source_ids:decision?.exploration?.exposure?.source_ids??[],target:decision?.exploration?.target,path:decision?.exploration?.path,instructions:'依据刚读完的字幕或音频转写写 answered、remaining、next_step；引用给定来源。有视觉疑问时先用 video_read_frames(read_id,times,reason) 补看相关时间点；需要核实口述时可用 debrief_read(audio=always) 重取本地转写。未解决保持 active。revisit 在原集合下建立有来源的后续问题，然后再次调用 exploration_next。'}
+    if(!progress)return {...envelope,status:'progress_required',next_action:'exploration_progress',decision_id:read.feed.decision_id,read_id:read.id,source_ids:decision?.exploration?.exposure?.source_ids??[],target:decision?.exploration?.target,path:decision?.exploration?.path,instructions:'依据刚读完的字幕或音频转写写 answered、remaining、next_step；引用给定来源。有视觉疑问时先用 video_read_frames(read_id,times,reason) 补看相关时间点；需要核实口述时可用 debrief_read(audio=always) 经 speech 服务核实转写。未解决保持 active。revisit 在原集合下建立有来源的后续问题，然后再次调用 exploration_next。'}
     if(!['engaged','completed'].includes(progress.outcome))continue
     if(decision.exploration.path==='revisit') {
       const questions=Object.values(store.state().concepts.exploration.questions)

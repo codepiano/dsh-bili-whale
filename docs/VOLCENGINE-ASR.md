@@ -15,6 +15,8 @@
 
 官方接口：[任务提交](https://docs.volcengine.com/docs/DoubaoVoice/task-submission-http-1?lang=zh)、[结果查询](https://docs.volcengine.com/docs/DoubaoVoice/result-query-http-1?lang=en)、[模型对比](https://docs.volcengine.com/docs/DoubaoVoice/model-list?lang=zh)。
 
-建议：当前先以本地 whisper 兜底。云端 2.0 可以作为后续可选异步提供方：持久化任务 ID、提交参数指纹、状态、查询重试与最终原文；提交状态不明时恢复查询而不是重复收费提交。取回完整转写后仍须沿用真实正文交付、来源哈希与独立转写类型，不能把任务受理算作已读。音频访问可使用短期对象存储链接，不将 B 站账号 Cookie 或账号签名媒体 URL 传给第三方。
+当前接入：视频读取通过 common-mcp 的 speech 服务原生 HTTP API（默认 `127.0.0.1:4325/api/`）使用豆包 2.0。插件不运行本地识别器、只流式下载/上传压缩音轨，不解码音轨。异步提交前持久化稳定请求身份，后续查询相同任务；提交状态不明时只以原始参数恢复同一身份，不另建付费任务。后端服务统一持有豆包凭据、任务和结果，插件只保存其访问凭据引用。
 
-本次未调用火山识别接口、未采购资源包，也未将音频上传云端。服务的真实识别质量、账号权限及实际延迟尚未实测。
+音频经过speech的TOS临时上传流程中转：申请带MD5/大小约束的签名表单，流式上传后以uploadId提交。B站Cookie仅用于取得压缩音轨，不向speech或豆包传递B站签名媒体链接。上传/任务ID和实际音轨SHA-256进入来源；TOS签名不记录到日志或普通状态文件。上传确认后删除本机临时音轨，云端清理由speech统一负责，不回退本地模型。
+
+本次接入验证包含模拟任务与真实 `/api/backends` 只读请求（200，doubao / cloud / volc.seedasr.auc，uploads已配置）。未实际提交收费转写、未采购资源包。实际识别质量、B 站链接云端可达性及任务延迟尚未实测。

@@ -2,6 +2,11 @@ import fs from 'node:fs'
 globalThis.fetch=async(url,options={})=>{
   const u=new URL(url),fixture=JSON.parse(fs.readFileSync(process.env.TEST_DEBRIEF_FIXTURE,'utf8'))
   fs.appendFileSync(process.env.TEST_REQUESTS,JSON.stringify({url:String(url),method:options.method??'GET'})+'\n')
+  if(u.hostname==='127.0.0.1'&&u.pathname==='/api/backends')return Response.json({uploads:{configured:true,maxBytes:512000000},backends:[{name:'doubao',configured:true,processing:'cloud',capabilities:{timestamps:true},resourceId:'volc.seedasr.auc'}]})
+  if(u.hostname==='127.0.0.1'&&u.pathname==='/api/audio-uploads')return Response.json({uploadId:'22222222-2222-4222-8222-222222222222',upload:{method:'POST',url:'https://fixture.tos-cn-beijing.volces.com/',fields:{key:'fixture',policy:'fixture-policy'}}})
+  if(u.hostname==='fixture.tos-cn-beijing.volces.com')return new Response(null,{status:204})
+  if(u.hostname==='127.0.0.1'&&u.pathname.endsWith('/wait'))return Response.json({id:'11111111-1111-4111-8111-111111111111',provider:'doubao',status:'queued',completed:false,waitTimedOut:true})
+  if(u.hostname==='127.0.0.1'&&u.pathname==='/api/transcriptions'&&options.method==='POST')return Response.json({id:'11111111-1111-4111-8111-111111111111',provider:'doubao',status:'queued'})
   if(options.method&&options.method!=='GET')throw Error('No platform writes allowed')
   if(u.pathname==='/x/web-interface/nav')return Response.json({code:0,data:{wbi_img:{img_url:'https://example.test/'+'a'.repeat(32)+'.png',sub_url:'https://example.test/'+'b'.repeat(32)+'.png'}}})
   if(u.pathname==='/x/web-interface/wbi/view')return Response.json({code:fixture.view_code??0,data:{cid:123,aid:456,title:'康德导读',desc:fixture.description??'视频简介',duration:90,owner:{name:'UP'},pubdate:1000,stat:{view:1000,like:3,favorite:2,coin:1,danmaku:0,reply:0},pic:'https://example.test/cover.jpg'}})
