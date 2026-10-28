@@ -39,8 +39,9 @@ function printSlate(selection) {
     console.log(`  ${String(i+1).padStart(2)}. ${x.bv}  ${String(x.d).padStart(4)}s  弹幕${String(x.dm).padStart(7)}  播放${String(x.play).padStart(9)}  ${x.t.slice(0,40)}  @${x.up} ${x._hits.length ? '['+x._hits.join('+')+']' : ''}`)
   }
 }
-const resumed=opt['run-id']?concepts.resume({n:N,per:PER}):null
+const resumed=opt['run-id']?await concepts.resume({n:N,per:PER}):null
 if(resumed) {
+  if(resumed.status==='judgment_required'){console.log(JSON.stringify(resumed));process.exit(0)}
   if(opt.json)console.log(JSON.stringify(resumed))
   else {console.log(`恢复本轮原清单，不重新搜索或增加疲劳：run=${resumed.run_id} · seed=${resumed.seed}`);printSlate(resumed)}
   process.exit(0)
@@ -95,6 +96,7 @@ function searchKeywordOf(p) {
 }
 const legacyKeywords = [...new Set(prefs.slice(0, 6).map(searchKeywordOf))]
 const interestSearch = await concepts.plan(legacyKeywords)
+if(interestSearch.status==='search_plan_required'){console.log(JSON.stringify(interestSearch));process.exit(0)}
 const searchKeywords = interestSearch.keywords
 
 const cred = JSON.parse(fs.readFileSync(path.join(HOME, '.bili-ai', 'credentials.json'), 'utf8'))
@@ -145,6 +147,7 @@ for (const [kwIndex, kw] of searchKeywords.entries()) {
       const j = await searchCached(kw, order)
       for (const it of (j?.data?.result ?? []).slice(0, Math.ceil(POOL / Math.max(1, searchKeywords.length)) + 4)) {
         pool.push({
+          description:String(it.description??'').replace(/<[^>]+>/g,'').slice(0,3000),
           bv: it.bvid, t: String(it.title).replace(/<[^>]+>/g, ''), d: secs(it.duration),
           dm: Number(it.danmaku ?? 0), play: Number(it.play ?? 0), up: it.author, kw,
         })
@@ -160,14 +163,14 @@ async function fetchPopular() {
   const j = await (await fetch('https://api.bilibili.com/x/web-interface/popular?pn=1&ps=20', { headers: H })).json()
   for (const it of (j?.data?.list ?? [])) {
     pool.push({ bv: it.bvid, t: String(it.title ?? '').replace(/<[^>]+>/g, ''), d: Number(it.duration ?? 0),
-      dm: Number(it.stat?.danmaku ?? 0), play: Number(it.stat?.view ?? 0), up: it.owner?.name ?? '', kw: '热门' })
+      description:String(it.desc??'').slice(0,3000), dm: Number(it.stat?.danmaku ?? 0), play: Number(it.stat?.view ?? 0), up: it.owner?.name ?? '', kw: '热门' })
   }
 }
 async function fetchRank() {
   const j = await (await fetch('https://api.bilibili.com/x/web-interface/ranking/v2?rid=0&type=all', { headers: H })).json()
   for (const it of (j?.data?.list ?? []).slice(0, 20)) {
     pool.push({ bv: it.bvid, t: String(it.title ?? '').replace(/<[^>]+>/g, ''), d: Number(it.duration ?? 0),
-      dm: Number(it.stat?.danmaku ?? 0), play: Number(it.stat?.view ?? 0), up: it.owner?.name ?? '', kw: '排行' })
+      description:String(it.desc??'').slice(0,3000), dm: Number(it.stat?.danmaku ?? 0), play: Number(it.stat?.view ?? 0), up: it.owner?.name ?? '', kw: '排行' })
   }
 }
 // 关注的人发了什么（2026-10-18 加）：真人才会"刷关注"——只搜关键词等于只刷"搜索"，不像人
@@ -308,7 +311,7 @@ for (const x of uniq) {
 }
 
 const selection = await concepts.select({candidates:uniq,legacy:diversified,n:N,per:PER})
-if (opt.json) {
+if (opt.json || selection.status==='judgment_required') {
   console.log(JSON.stringify({...selection,search:interestSearch,candidate_count:uniq.length}))
 } else {
   console.log(`偏好（配置优先，旧日记兜底）: ${prefs.join(' · ')}`)

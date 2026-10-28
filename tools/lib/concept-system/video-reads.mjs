@@ -82,7 +82,7 @@ export class VideoReads {
   async acceptOutput(text,{session_id,trace_id=null,route=null,learn=true}) {
     const tokens=[...String(text).matchAll(/BILI_DEBRIEF_RECEIPT:([a-f0-9-]{36}):([a-f0-9]{64})/g)].slice(0,24)
     if(!tokens.length)return []
-    return this.store.transaction({state:false},(d,emit)=>{
+    return this.store.transaction({},(d,emit)=>{
       const accepted=[]
       for(const [,id,digest] of tokens) {
         const read=d.reads.get(id)
@@ -98,6 +98,60 @@ export class VideoReads {
         const next={...read,status:'presented',session_id,trace_id,learning_queued:learn,presented_at:new Date(this.store.now()).toISOString()}
         d.reads.put(next)
         emit('video.material_presented',{read_id:id,bvid:read.bvid,kind:read.kind,parts:read.sources.length,material:read.material,scope:'tool_result_receipt_not_watch_completion'},{session_id,trace_id,decision_id:read.feed?.decision_id??null})
+        const decision = next.feed?.decision_id
+          ? d.state.concepts?.decisions[next.feed.decision_id]
+          : null;
+        if (
+          decision?.exploration &&
+          !decision.exploration.exposure &&
+          next.kind === "subtitles"
+        ) {
+          for (const spec of next.sources) {
+            const source = this.store.getObject(spec.object.hash).content;
+            if (!d.state.concepts.sources[source.id]) {
+              d.state.concepts.sources[source.id] = source;
+              emit(
+                "source.observed",
+                { source },
+                {
+                  session_id,
+                  trace_id: next.feed.trace_id,
+                  source: "video_receipt",
+                },
+              );
+            }
+          }
+          const exposure = {
+            read_id: id,
+            bvid: read.bvid,
+            at: this.store.now(),
+            source_ids: next.sources.map((s) => s.id),
+            scope: "subtitle_material_presented_not_watch_completion",
+            attribution: "host_tool_result_receipt",
+          };
+          decision.exploration.exposure = exposure;
+          const object = this.store.object(d.state.concepts),
+            version = {
+              id: crypto.randomUUID(),
+              role: "concept_state",
+              status: "present",
+              hash: object.hash,
+              redacted: object.redacted,
+              actor: "video_receipt",
+              at: new Date(this.store.now()).toISOString(),
+            };
+          d.addVersion(version);
+          emit("snapshot.captured", version, {
+            session_id,
+            trace_id: next.feed.trace_id,
+            decision_id: decision.id,
+          });
+          emit("exploration.exposed", exposure, {
+            session_id,
+            trace_id: next.feed.trace_id,
+            decision_id: decision.id,
+          });
+        }
         settleVideoRead(d,emit,next,this.store.now());accepted.push(id)
       }
       return accepted

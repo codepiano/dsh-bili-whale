@@ -2,6 +2,7 @@ import crypto from 'node:crypto'
 import { ObservationStore, hash, redact } from './store.mjs'
 import { scoreDecision, commitScoredDecision } from './engine.mjs'
 import { VideoReads } from './video-reads.mjs'
+import {selectJudged,explorationForFeed,planSearch} from './feed-judgment.mjs'
 
 const scene='feed'
 const normalized=s=>String(s??'').normalize('NFKC').toLowerCase().trim()
@@ -103,20 +104,58 @@ export class FeedConcepts {
     this.runId=runId;this.seed=seed;this.trace='feed-'+hash(runId).slice(0,32)
     this.request=redact(request)
   }
-  resume({n,per}) {
-    if(!this.enabled)return null
-    return this.store.journal.use(db=>{
-      const receipt=key=>{const row=db.prepare('SELECT result FROM receipts WHERE key=?').get(key);return row?JSON.parse(row.result).value:null}
-      const selected=receipt('feed-select:'+this.runId)
-      if(!selected)return null
-      if(selected.n!==n||selected.per!==per||selected.seed!==this.seed||selected.mode!==this.mode||hash(selected.request)!==hash(this.request))throw Error('Completed feed run has different parameters; use a new run-id')
-      return {...selected,search:receipt('feed-plan:'+this.runId)}
-    })
+  async resume({ n, per }) {
+    if (!this.enabled) return null;
+    const completed = this.store.journal.use((db) => {
+      const receipt = (key) => {
+        const row = db
+          .prepare("SELECT result FROM receipts WHERE key=?")
+          .get(key);
+        return row ? JSON.parse(row.result).value : null;
+      };
+      const selected = receipt("feed-select:" + this.runId);
+      if (!selected) return null;
+      if (
+        selected.n !== n ||
+        selected.per !== per ||
+        selected.seed !== this.seed ||
+        selected.mode !== this.mode ||
+        hash(selected.request) !== hash(this.request)
+      )
+        throw Error(
+          "Completed feed run has different parameters; use a new run-id",
+        );
+      return { ...selected, search: receipt("feed-plan:" + this.runId) };
+    });
+    if (completed) return completed;
+    const pending = this.store.state().feed_judgments?.[this.runId];
+    if (!pending) return null;
+    if (
+      pending.args.n !== n ||
+      pending.args.per !== per ||
+      pending.seed !== this.seed ||
+      hash(pending.request) !== hash(this.request)
+    )
+      throw Error("Pending feed run has different parameters");
+    const selected = await this.select(pending.args);
+    const search = this.store.journal.use((db) => {
+      const row = db
+        .prepare("SELECT result FROM receipts WHERE key=?")
+        .get("feed-plan:" + this.runId);
+      return row ? JSON.parse(row.result).value : null;
+    });
+    return {
+      ...selected,
+      search,
+      candidate_count: pending.args.candidates.length,
+    };
   }
   readBvids() {return this.enabled?new VideoReads(this.store).seen():[]}
   async plan(legacyKeywords) {
     if(!this.enabled)return {keywords:legacyKeywords,proposed:[],mode:'disabled'}
     legacyKeywords=redact(legacyKeywords)
+    const planned=await planSearch(this,legacyKeywords)
+    if(planned)return planned
     return this.store.transaction({key:'feed-plan:'+this.runId,input:{seed:this.seed,legacyKeywords,mode:this.mode,request:this.request}},(d,emit)=>{
       const state=d.state.concepts,now=this.store.now(),plan=interestPlan(state,this.seed+':interests',now)
       let preview=null
@@ -125,7 +164,7 @@ export class FeedConcepts {
       const active=this.mode==='active'&&plan.keywords.length>0
       // Reserve two of at most six search slots for explicit/fallback preferences.
       const keywords=active?[...new Set([...plan.keywords,...legacyKeywords])].slice(0,6):legacyKeywords
-      const result={keywords,proposed:plan.keywords,mode:this.mode,preview_id:preview,member_preview_ids,run_id:this.runId,seed:this.seed}
+      const result={keywords,proposed:plan.keywords,mode:this.mode,preview_id:preview,member_preview_ids,exploration:this.mode==='active'?explorationForFeed(state,this.seed,now):null,run_id:this.runId,seed:this.seed}
       emit('feed.search_planned',result,{trace_id:this.trace})
       return result
     })
@@ -136,6 +175,8 @@ export class FeedConcepts {
     candidates=redact(candidates);legacy=redact(legacy)
     if(!Array.isArray(candidates)||!Array.isArray(legacy)||candidates.length>400||legacy.some(v=>!candidates.some(c=>c.bv===v.bv)))throw Error('Invalid feed candidate slate')
     if(candidates.some(v=>!/^BV[0-9A-Za-z]{10}$/.test(v.bv)||typeof v.t!=='string'))throw Error('Invalid feed video identity/title')
+    const judged=await selectJudged(this,{candidates,legacy,n,per},{archive,commit,videoContributions,feedGroups})
+    if(judged)return judged
     // One transaction covers the complete slate and fatigue updates. Repeating an
     // identical run-id returns its durable receipt, even after a process crash.
     return this.store.transaction({key:'feed-select:'+this.runId,input:{candidates,legacy,n,per,seed:this.seed,mode:this.mode,request:this.request}},(d,emit)=>{

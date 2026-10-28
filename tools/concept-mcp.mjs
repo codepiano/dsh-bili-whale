@@ -7,6 +7,10 @@ import { redact } from "./lib/concept-system/store.mjs";
 const engine = new ConceptEngine(),
   server = new McpServer({ name: "bili-whale-concepts", version: "0.1.0" });
 const descriptions = {
+  feed_search_plan:
+    "为 feed 的 search_plan_required 阶段提出符合程序所选探索路径的查询词和理由；不修改概念标签。随后恢复原 run-id 真实检索。",
+  feed_assess:
+    "评估 feed 返回的全部候选：逐项引用真实候选材料，判断所给立场的支持/反对与探索相关性。仅记录当前模型判断，不能伪造观看；之后恢复同一 feed run-id 让程序决定实际清单。",
   exploration_configure:
     "配置深挖、稀疏群回访、新词发现比例（总和为 1）和实际曝光窗口；记录理由与版本。",
   exploration_plan:

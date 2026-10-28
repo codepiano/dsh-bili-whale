@@ -82,13 +82,33 @@ export function scoreDecision(state, input, now) {
         throw Error("Member scene does not match decision scene");
       if (c.subject !== input.subject)
         throw Error("Collection subject does not match decision subject");
+      if (
+        item.purpose === "stance" &&
+        (!m.tags.includes("belief") || m.interpretation !== "explicit")
+      )
+        throw Error("Stance contributions require an explicit accepted belief");
       const evidence = evidenceIdentity(state, m.source_id);
       if (seen.has(evidence)) continue;
       seen.add(evidence);
-      const base = collectionStrength(c, state),
+      const evidenceBase = collectionStrength(c, state),
         f = fatigue(c, input.scene, now, p);
+      const legacyWeight = c.legacy_pref?.weight;
+      const prior =
+        input.feed_judgment?.policy === "stance-prior-v1" &&
+        item.purpose === "stance" &&
+        Number.isFinite(legacyWeight) &&
+        legacyWeight > 0
+          ? {
+              algorithm: "stance-prior-v1",
+              weight: legacyWeight,
+              factor: 1 + clamp(Math.log(legacyWeight), -0.25, 0.25),
+              source_id: c.legacy_pref.source_id ?? null,
+            }
+          : null;
+      const base = evidenceBase * (prior?.factor ?? 1);
       contributions.push({
         ...item,
+        ...(prior ? { legacy_prior: prior, evidence_base: evidenceBase } : {}),
         base,
         fatigue: f,
         value: base * item.relevance * item.strength * (1 - f),
@@ -141,9 +161,12 @@ export function commitScoredDecision(state, preview, input, now) {
     row = preview.rows.find((r) => r.label === selected && r.eligible);
   if (!row) throw Error("Selected option is not eligible");
   const changes = [];
-  for (const id of new Set(
-    row.contributions.map((c) => c.collection_id),
-  )) {
+  for (const id of new Set([
+    ...row.contributions
+      .filter((c) => c.purpose !== "stance")
+      .map((c) => c.collection_id),
+    ...(row.target?.collection_id ? [row.target.collection_id] : []),
+  ])) {
     const c = state.collections[id],
       old = fatigue(c, preview.input.scene, now, state.parameters);
     c.fatigue[preview.input.scene] = {
@@ -169,10 +192,11 @@ export function commitScoredDecision(state, preview, input, now) {
     overridden: selected !== preview.winner,
     reason: input.reason,
     at: now,
-    collection_ids: [
-      ...new Set(row.contributions.map((c) => c.collection_id)),
-    ],
+    collection_ids: [...new Set(row.contributions.map((c) => c.collection_id))],
     fatigue_changes: changes,
+    ...(preview.input.feed_judgment
+      ? { feed_judgment: preview.input.feed_judgment }
+      : {}),
     ...(preview.exploration
       ? {
           exploration: {
@@ -220,6 +244,16 @@ export class ConceptEngine {
       );
     if (name === "exploration_query")
       return explorationQuery(get({ state: this.store.state() }), input);
+    if (name === "feed_search_plan")
+      return (await import("./feed-judgment.mjs")).assessSearch(
+        this.store,
+        input,
+      );
+    if (name === "feed_assess")
+      return (await import("./feed-judgment.mjs")).assessFeed(
+        this.store,
+        input,
+      );
     if (name === "concept_query") return this.query(input);
     if (name === "trace_get") return this.store.events(input);
     if (name === "version_list") return this.store.versions(input.role);
@@ -553,7 +587,7 @@ export class ConceptEngine {
     let explorationGuidance = false;
     if (s.exploration && ["general", "watch"].includes(scene)) {
       const ratios = s.exploration.config.ratios;
-      const guide = `\n探索比例：深挖 ${Math.round(ratios.deep * 100)}%、稀疏群回访 ${Math.round(ratios.revisit * 100)}%、新词发现 ${Math.round(ratios.discover * 100)}%。选片前用 exploration_plan 规划路径；深挖沿问题与反例推进，回访优先补薄弱概念，新词从邻近及陌生领域的真实来源提取。用 decision_preview/commit 记录目标与理由，实际接触后用 exploration_progress 记录回答、剩余问题、下一步和来源；未接触不计曝光。`;
+      const guide = `\n探索配比 ${Math.round(ratios.deep * 100)}/${Math.round(ratios.revisit * 100)}/${Math.round(ratios.discover * 100)}。按 feed→feed_search_plan→feed→feed_assess→feed 执行，沿用 run-id。立场判断须引用材料，阅读后记问题进展。`;
       if ([...(text + guide)].length <= budget) {
         text += guide;
         explorationGuidance = true;
@@ -570,7 +604,7 @@ export class ConceptEngine {
       if (!items.length) continue;
       for (const m of items) {
         if (selected.includes(m.id) || omitted.includes(m.id)) continue;
-        const line = `\n${c.name}：${m.content}（${m.tags.join("/")}；${m.interpretation}）`;
+        const line = `\n${c.name}：${m.content}`;
         if ([...(text + line)].length <= budget) {
           text += line;
           selected.push(m.id);

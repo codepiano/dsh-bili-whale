@@ -19,14 +19,17 @@ const source = z
     excerpt: text,
     ref: z.string().max(2000).optional(),
     occurred_at: z.string().datetime().optional(),
-    video: z.object({
-      bvid:z.string().regex(/^BV[0-9A-Za-z]{10}$/),
-      cid:z.string().regex(/^\d+$/),
-      section:z.enum(['subtitles','description']),
-      part:z.number().int().min(1).max(24),
-      parts:z.number().int().min(1).max(24),
-      content_hash:z.string().regex(/^[a-f0-9]{64}$/),
-    }).strict().optional(),
+    video: z
+      .object({
+        bvid: z.string().regex(/^BV[0-9A-Za-z]{10}$/),
+        cid: z.string().regex(/^\d+$/),
+        section: z.enum(["subtitles", "description"]),
+        part: z.number().int().min(1).max(24),
+        parts: z.number().int().min(1).max(24),
+        content_hash: z.string().regex(/^[a-f0-9]{64}$/),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 export const explorationRatios = z
@@ -50,6 +53,50 @@ const target = z
   })
   .strict();
 export const schemas = {
+  feed_search_plan: z
+    .object({
+      key,
+      run_id: id,
+      queries: z.array(z.string().trim().min(2).max(40)).min(1).max(4),
+      reason: text,
+    })
+    .strict(),
+  feed_assess: z
+    .object({
+      key,
+      run_id: id,
+      assessments: z
+        .array(
+          z
+            .object({
+              bvid: z.string().regex(/^BV[0-9A-Za-z]{10}$/),
+              exploration: z
+                .object({
+                  relevance: unit,
+                  reason: text,
+                  quote: z.string().min(1).max(500),
+                })
+                .strict(),
+              discovered_term: z.string().trim().min(1).max(100).optional(),
+              stances: z
+                .array(
+                  z
+                    .object({
+                      collection_id: id,
+                      member_id: id,
+                      strength: z.number().finite().min(-1).max(1),
+                      reason: text,
+                      quote: z.string().min(1).max(500),
+                    })
+                    .strict(),
+                )
+                .max(8),
+            })
+            .strict(),
+        )
+        .max(8),
+    })
+    .strict(),
   exploration_configure: z
     .object({
       key,
@@ -195,6 +242,7 @@ export const schemas = {
                     .object({
                       collection_id: id,
                       member_id: id,
+                      purpose: z.enum(["stance", "exploration"]).optional(),
                       relevance: unit,
                       strength: z.number().finite().min(-1).max(1),
                       reason: text,

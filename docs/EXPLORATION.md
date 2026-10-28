@@ -103,3 +103,7 @@ node tools/bili.mjs concept exploration_query --json '{"subject":"fish","scene":
 ## 部署与启用
 
 本地 desktop profile 通过 link 加载插件的 main 工作目录。发布时先在隔离工作树完成依赖安装、测试及观察页构建，再将已验证提交合入 main，部署运行依赖和构建产物。宿主需连接 `bili-whale-concepts` MCP，使用与调度器一致的私有 `BILI_CONCEPT_HOME`；观察开关打开且 mode=active 时，探索流程提示才会加入学习上下文。初始化只保存 60% / 25% / 15% 的真实配置，不向在线学习库写入测试概念或模拟观看进展。运行版本、宿主连接和实际功能以发布验收记录为准。
+
+## 自动选片与立场闭环
+
+active feed 已增加探索查询规划和带引文的立场判断阶段，并与真实字幕回执及原生上下文接收回执关联。操作协议与旧权重先验见[立场、探索与真实上下文闭环](STANCE-EXPLORATION-LOOP.md)。

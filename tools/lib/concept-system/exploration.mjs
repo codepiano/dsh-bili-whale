@@ -31,7 +31,10 @@ const decisions = (s, subject, scene) =>
     .filter((d) => d.subject === subject && d.scene === scene && d.exploration)
     .sort((a, b) => b.at - a.at || b.id.localeCompare(a.id));
 const exposed = (d) =>
+  !!d.exploration.exposure ||
   ["engaged", "completed"].includes(d.exploration.progress?.outcome);
+const exposedAt = (d) =>
+  d.exploration.exposure?.at ?? d.exploration.progress?.at;
 const validGroup = (s, id, subject, scene) => {
   const c = s.collections[id];
   if (!c || c.subject !== subject || !evidence(s, c, scene).length)
@@ -58,9 +61,7 @@ export function explorationPlan(s, input, now) {
   const cfg = config(s),
     history = decisions(s, input.subject, input.scene).filter(exposed);
   history.sort(
-    (a, b) =>
-      b.exploration.progress.at - a.exploration.progress.at ||
-      b.id.localeCompare(a.id),
+    (a, b) => exposedAt(b) - exposedAt(a) || b.id.localeCompare(a.id),
   );
   const recent = history.slice(0, cfg.history_window);
   const counts = Object.fromEntries(
@@ -96,9 +97,12 @@ export function explorationPlan(s, input, now) {
           .map((other) => other.id),
       );
       const seen = history.filter((d) =>
-        d.collection_ids.some((id) => sameEvidence.has(id)),
+        (d.exploration.target.collection_id
+          ? [d.exploration.target.collection_id]
+          : d.collection_ids
+        ).some((id) => sameEvidence.has(id)),
       );
-      const last = Math.max(0, ...seen.map((d) => d.exploration.progress.at));
+      const last = Math.max(0, ...seen.map((d) => exposedAt(d)));
       const scarcity = 1 / Math.sqrt(sources.length);
       const neglect = last
         ? Math.min(1, Math.max(0, now - last) / (7 * 86400000))
@@ -244,7 +248,11 @@ export function validateExploration(s, input, now) {
       throw Error(
         "Exploration target needs contribution evidence from its collection",
       );
-    if (o.contributions.some((c) => c.collection_id !== t.collection_id))
+    if (
+      o.contributions.some(
+        (c) => c.collection_id !== t.collection_id && c.purpose !== "stance",
+      )
+    )
       throw Error(
         "Exploration contributions must belong to the target collection",
       );

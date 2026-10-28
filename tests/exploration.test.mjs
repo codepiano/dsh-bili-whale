@@ -401,8 +401,8 @@ test("configured exploration participates in budgeted learning context without c
     scene: "watch",
     budget: 1000,
   });
-  assert.match(r.text, /exploration_plan/);
-  assert.match(r.text, /exploration_progress/);
+  assert.match(r.text, /feed_assess/);
+  assert.match(r.text, /问题进展/);
   assert.ok([...r.text].length <= 1000);
   const short = await engine.call("personal_render", {
     scene: "watch",
