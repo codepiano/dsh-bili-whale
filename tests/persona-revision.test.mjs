@@ -129,3 +129,17 @@ test('one new experience can compare against prior reflections without re-consum
  assert.equal(calls,2);assert.equal(last.length,3);assert.ok(last.some(s=>s.id===fish2.id));assert.equal(store.state().persona_revision.seen.length,3)
  assert.equal(store.events({type:'persona.revision_applied'}).length,0)
 })
+test('explicit retry retains failed evidence and counters and lets the ordinary worker reassess original sources',async t=>{
+ const {store,file,manager}=box(t);await done(store,feedback)
+ let now=0
+ const w=new PersonaRevisionWorker({store,file,now:()=>now,evaluate:async()=>{throw Error('needs correction')}})
+ await w.wake();now=60001;await w.wake();now=120002;await w.wake();await w.stop()
+ const failed=manager.status().failures[0];assert.ok(failed)
+ await assert.rejects(manager.retry({attempt_id:failed.attempt_id,expected_hash:hash('wrong'),reason:'纠正协议后重试'}),/changed/)
+ const retry=await manager.retry({attempt_id:failed.attempt_id,expected_hash:hash(base),reason:'纠正协议后重试'})
+ assert.equal(retry.retry_of,failed.attempt_id);assert.equal(fs.readFileSync(file,'utf8'),base)
+ const next=new PersonaRevisionWorker({store,file,evaluate:async req=>{assert.equal(req.sources[0].id,feedback.id);assert.equal(req.previous_error,'needs correction');return patch()}})
+ await next.wake();await next.stop();assert.match(fs.readFileSync(file,'utf8'),/剩下的缺口/)
+ assert.equal(store.events({type:'persona.reflection_failed'}).length,3);assert.equal(store.events({type:'persona.reflection_retried'}).length,1)
+ assert.equal(store.events({type:'learning.enqueued'}).length,1,'retry does not create a fake experience')
+})

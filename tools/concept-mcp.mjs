@@ -7,6 +7,7 @@ import { redact } from "./lib/concept-system/store.mjs";
 const engine = new ConceptEngine(),
   server = new McpServer({ name: "bili-whale-concepts", version: "0.1.0" });
 const descriptions = {
+  persona_revision_retry:'用原始已完成来源重新排队一次已耗尽的反思，必须给出 attempt_id、当前 persona 哈希和理由。原失败记录保留，不接收伪造经历或指定修改内容，由正常后台重新判断。',
   persona_revision_history:'查看 persona 当前文件、哈希、自动修订/回滚版本、来源与修改理由；不修改文件。',
   persona_revision_rollback:'将指定修订恢复到修改前；必须携带当前文件 expected_hash 和理由。保留新回滚版本与原历史，拒绝覆盖未知外部修改。',
   concept_catalog:'概念群目录索引。可按主体、关键词分页检索；包含定义、归属边界、别名、代表成员及原始来源。先查目录，用群ID归类，缺少定义会显式标记。',

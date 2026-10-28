@@ -63,6 +63,7 @@ export const collectionPlacement = z.union([
   z.object({name:z.string().trim().min(1).max(100),...collectionMetadata,reason:z.string().trim().min(1).max(1000)}).strict(),
 ]);
 export const schemas = {
+  persona_revision_retry:z.object({attempt_id:id,expected_hash:z.string().regex(/^[a-f0-9]{64}$/),reason:text}).strict(),
   persona_revision_history:z.object({limit:z.number().int().min(1).max(100).default(20)}).strict(),
   persona_revision_rollback:z.object({revision_id:id,expected_hash:z.string().regex(/^[a-f0-9]{64}$/),reason:text}).strict(),
   concept_catalog:z.object({subject:subject.optional(),query:z.string().max(300).default(''),page:z.number().int().min(1).max(100000).default(1),limit:z.number().int().min(1).max(100).default(20)}).strict(),

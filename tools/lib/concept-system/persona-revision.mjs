@@ -6,6 +6,8 @@ import { HOME } from '../paths.mjs'
 import { ObservationStore, hash, atomicWrite, redact } from './store.mjs'
 
 export const personaFile=()=>path.join(HOME,'.bili-ai','persona.md')
+const eventFor=(store,type,id)=>store.journal.use(db=>{const row=db.prepare("SELECT payload FROM events WHERE type=? AND json_extract(payload,'$.data.attempt_id')=? ORDER BY seq DESC LIMIT 1").get(type,id);return row?JSON.parse(row.payload):null})
+const failures=store=>store.journal.use(db=>db.prepare("SELECT payload FROM events WHERE type='persona.reflection_failed' AND json_extract(payload,'$.data.retry')=0 ORDER BY seq DESC LIMIT 100").all().map(r=>JSON.parse(r.payload)))
 const init=()=>({schema:1,history:[],seen:[],pending:null,attempt:null})
 const evidence=z.object({source_id:z.string().min(1).max(200),quote:z.string().trim().min(1).max(600)}).strict()
 export const revisionSchema=z.object({edits:z.array(z.object({before:z.string().max(2000),after:z.string().max(2000),reason:z.string().trim().min(1).max(1000),trigger:z.enum(['feedback','reflection']),evidence:z.array(evidence).min(1).max(8)}).strict()).max(3),reason:z.string().trim().min(1).max(1000)}).strict()
@@ -32,7 +34,7 @@ export async function withPersonaLock(file,fn) {
 }
 export function validateRevision(raw,base,sources) {
   const result=revisionSchema.parse(raw);let text=base
-  for(const edit of result.edits) {
+  for(const [index,edit] of result.edits.entries()) {
     if(edit.before===edit.after)throw Error('Empty persona edit')
     const cited=edit.evidence.map(e=>{
       const source=sources.find(s=>s.id===e.source_id)
@@ -40,7 +42,7 @@ export function validateRevision(raw,base,sources) {
       return source
     })
     if(edit.trigger==='feedback'&&!cited.some(s=>s.actor==='user'))throw Error('Feedback revision needs direct user evidence')
-    if(edit.trigger==='reflection'&&new Set(cited.filter(s=>s.actor==='fish').map(s=>hash(s.excerpt))).size<2)throw Error('Reflection needs two independent fish experiences')
+    if(edit.trigger==='reflection'&&new Set(cited.filter(s=>s.actor==='fish').map(s=>hash(s.excerpt))).size<2)throw Error('edits['+index+']: Reflection needs two independent fish experiences from DIFFERENT source_ids; offered fish citations were '+cited.filter(s=>s.actor==='fish').map(s=>s.id).join(',')+'; omit this edit if evidence is insufficient')
     if(edit.before) {
       if(text.split(edit.before).length!==2)throw Error('Persona patch must match exactly once')
       text=text.replace(edit.before,edit.after)
@@ -54,7 +56,7 @@ export function validateRevision(raw,base,sources) {
 }
 export class PersonaRevisions {
   constructor({store=new ObservationStore(),file=personaFile()}={}){this.store=store;this.file=file}
-  status(limit=20){const state=this.store.state().persona_revision??init();const current=readPersona(this.file);return {current_hash:current.hash,current_text:current.text,pending:state.pending?.id??null,history:state.history.slice(-limit).reverse()}}
+  status(limit=20){const state=this.store.state().persona_revision??init();const current=readPersona(this.file);return {current_hash:current.hash,current_text:current.text,pending:state.pending?.id??null,failures:failures(this.store).map(e=>({attempt_id:e.data.attempt_id,error:e.data.error,at:e.at})),history:state.history.slice(-limit).reverse()}}
   async recoverLocked() {
     const p=this.store.state().persona_revision?.pending;if(!p)return
     const current=readPersona(this.file)
@@ -77,6 +79,25 @@ export class PersonaRevisions {
     })
   }
   async recover(){return withPersonaLock(this.file,()=>this.recoverLocked())}
+  async retry({attempt_id,expected_hash,reason}) {
+    const failed=eventFor(this.store,'persona.reflection_failed',attempt_id)
+    if(!failed||failed.data.retry!==false)throw Error('Unknown exhausted persona reflection')
+    const requested=eventFor(this.store,'persona.reflection_requested',attempt_id)
+    const queued=eventFor(this.store,'persona.reflection_queued',attempt_id)
+    if(!requested||!queued)throw Error('Missing original persona reflection provenance')
+    const original=this.store.getObject(requested.data.request.hash).content
+    return withPersonaLock(this.file,async()=>{
+      await this.recoverLocked();const base=readPersona(this.file)
+      if(base.hash!==expected_hash)throw Error('Persona changed since retry request')
+      return this.store.transaction({},(d,emit)=>{
+        const s=(d.state.persona_revision??=init())
+        if(s.attempt&&!['failed','complete'].includes(s.attempt.status))throw Error('Persona reflection already pending')
+        for(const source of original.sources){const jobs=(queued.data.evidence_job_ids??queued.data.job_ids).map(id=>d.jobs.get(id));if(!jobs.some(j=>j?.status==='done'&&j.source.id===source.id&&j.source.actor===source.actor&&j.source.excerpt.startsWith(source.excerpt)))throw Error('Original completed source is no longer available')}
+        const row={id:crypto.randomUUID(),retry_of:attempt_id,error:failed.data.error,status:'ready',attempts:0,available_at:0,owner:null,lease_until:0,job_ids:queued.data.job_ids,evidence_job_ids:queued.data.evidence_job_ids??queued.data.job_ids,source_ids:original.sources.map(x=>x.id),request:{...original,base}}
+        s.attempt=row;emit('persona.reflection_retried',{attempt_id:row.id,retry_of:attempt_id,reason});emit('persona.reflection_queued',{attempt_id:row.id,job_ids:row.job_ids,evidence_job_ids:row.evidence_job_ids,source_ids:row.source_ids,retry_of:attempt_id});return {attempt_id:row.id,retry_of:attempt_id,queued:true}
+      })
+    })
+  }
   async rollback({revision_id,expected_hash,reason}) {
     const revision=this.store.state().persona_revision?.history.find(r=>r.id===revision_id)
     if(!revision)throw Error('Unknown persona revision')
@@ -107,8 +128,8 @@ export class PersonaRevisionWorker {
       const fish=new Set(sources.filter(s=>s.actor==='fish').map(s=>hash(s.excerpt)))
       if(!sources.some(s=>s.actor==='user')&&fish.size<2){return null}
       const offered=sources.map(s=>({...s,excerpt:s.excerpt.slice(0,4000)}))
-      const row={id:crypto.randomUUID(),status:'ready',attempts:0,available_at:0,owner:this.owner,lease_until:this.now()+90000,job_ids:jobs.map(j=>j.id),source_ids:offered.map(s=>s.id),request:{base,sources:offered,route:jobs.at(-1).route,session_id:jobs.at(-1).session_id}}
-      s.attempt=row;emit('persona.reflection_queued',{attempt_id:row.id,job_ids:row.job_ids,source_ids:row.source_ids});return row
+      const row={id:crypto.randomUUID(),status:'ready',attempts:0,available_at:0,owner:this.owner,lease_until:this.now()+90000,job_ids:jobs.map(j=>j.id),evidence_job_ids:[...jobs,...support].map(j=>j.id),source_ids:offered.map(s=>s.id),request:{base,sources:offered,route:jobs.at(-1).route,session_id:jobs.at(-1).session_id}}
+      s.attempt=row;emit('persona.reflection_queued',{attempt_id:row.id,job_ids:row.job_ids,evidence_job_ids:row.evidence_job_ids,source_ids:row.source_ids});return row
     })
     if(!attempt||!this.enabled()||!this.idle())return
     if(!attempt.evaluation){
