@@ -74,7 +74,8 @@
     ],
     "skipChance": 0.3,
     "maxVideos": 5,
-    "minGapMin": 10
+    "minGapMin": 10,
+    "readOnly": false
   },
   "notify": {
     "type": "none",

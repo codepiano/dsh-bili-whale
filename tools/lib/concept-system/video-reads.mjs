@@ -45,7 +45,7 @@ export class VideoReads {
         if(!selection||!selection.selected.some(v=>v.bv===bvid))throw Error('Video is not in the specified feed reading slate')
         feed={run_id:options.feed_run_id,trace_id:selection.trace_id,decision_id:selection.mode==='active'?(selection.decisions.find(x=>x.selected===bvid)?.id??null):null}
       }
-      const read={id:crypto.randomUUID(),bvid,feed,kind:'none',status:'started',started_at:new Date(this.store.now()).toISOString(),options:redact(options)}
+      const read={id:crypto.randomUUID(),bvid,feed,...(feed?{read_policy:'subtitle-pages-v1'}:{}),kind:'none',status:'started',started_at:new Date(this.store.now()).toISOString(),options:redact(options)}
       d.reads.put(read);emit('video.read_started',{read_id:read.id,bvid,options:read.options},{trace_id:feed?.trace_id??null,decision_id:feed?.decision_id??null});return read
     })
   }
@@ -79,7 +79,9 @@ export class VideoReads {
       d.reads.bindJob(read.id,job.id)
     }
   }
-  async acceptOutput(text,{session_id,trace_id=null,route=null,learn=true}) {
+  async acceptOutput(text,{session_id,trace_id=null,route=null,learn=true,host_seq=null,tool_call_id=null}) {
+    let pagePayload;try{pagePayload=JSON.parse(String(text))}catch{}
+    if(pagePayload?.type==='bili.subtitle_page.v1')return this.acceptPage(pagePayload,{session_id,trace_id,route,learn,host_seq,tool_call_id})
     const tokens=[...String(text).matchAll(/BILI_DEBRIEF_RECEIPT:([a-f0-9-]{36}):([a-f0-9]{64})/g)].slice(0,24)
     if(!tokens.length)return []
     return this.store.transaction({},(d,emit)=>{
@@ -94,10 +96,18 @@ export class VideoReads {
         // Validate object integrity before admitting any source. No caller can
         // supply text, arbitrary object paths or model routes in the marker.
         this.store.getObject(read.material.hash)
-        if(learn)this.queueSources(d,emit,read,{session_id,trace_id,route})
-        const next={...read,status:'presented',session_id,trace_id,learning_queued:learn,presented_at:new Date(this.store.now()).toISOString()}
+        const queueNow=learn&&!(read.read_policy&&read.kind==='subtitles')
+        if(queueNow)this.queueSources(d,emit,read,{session_id,trace_id,route})
+        const next={...read,status:'presented',session_id,trace_id,learning_queued:queueNow,requires_delivery:!!read.read_policy&&read.kind==='subtitles'&&String(route?.provider??'').startsWith('deepseek'),presented_at:new Date(this.store.now()).toISOString()}
         d.reads.put(next)
         emit('video.material_presented',{read_id:id,bvid:read.bvid,kind:read.kind,parts:read.sources.length,material:read.material,scope:'tool_result_receipt_not_watch_completion'},{session_id,trace_id,decision_id:read.feed?.decision_id??null})
+        if(!next.read_policy)this.expose(d,emit,next,session_id)
+        settleVideoRead(d,emit,next,this.store.now());accepted.push(id)
+      }
+      return accepted
+    })
+  }
+  expose(d,emit,next,session_id) {
         const decision = next.feed?.decision_id
           ? d.state.concepts?.decisions[next.feed.decision_id]
           : null;
@@ -122,11 +132,11 @@ export class VideoReads {
             }
           }
           const exposure = {
-            read_id: id,
-            bvid: read.bvid,
+            read_id: next.id,
+            bvid: next.bvid,
             at: this.store.now(),
             source_ids: next.sources.map((s) => s.id),
-            scope: "subtitle_material_presented_not_watch_completion",
+            scope: next.read_policy ? "subtitle_pages_presented_not_watch_completion" : "subtitle_material_presented_not_watch_completion",
             attribution: "host_tool_result_receipt",
           };
           decision.exploration.exposure = exposure;
@@ -152,7 +162,49 @@ export class VideoReads {
             decision_id: decision.id,
           });
         }
-        settleVideoRead(d,emit,next,this.store.now());accepted.push(id)
+  }
+  page({read_id,page}) {
+    return this.store.transaction({state:false},d=>{
+      const read=d.reads.get(read_id)
+      if(!read?.session_id||read.kind!=='subtitles')throw Error('Subtitle page needs a presented subtitle receipt')
+      if(read.coverage.truncated)throw Error('Truncated acquisition cannot claim a complete subtitle read')
+      const source=read.sources[page-1]
+      if(!source)throw Error('Unknown subtitle page')
+      const text=this.store.getObject(source.object.hash).content.excerpt
+      return {type:'bili.subtitle_page.v1',read_id,page,total_pages:read.sources.length,material_hash:read.material.hash,text,receipt_hash:hash([read_id,page,source.object.hash,text])}
+    })
+  }
+  async acceptPage(payload,{session_id,trace_id=null,route=null,learn=true,host_seq=null,tool_call_id=null}) {
+    if(payload?.type!=='bili.subtitle_page.v1')return []
+    return this.store.transaction({},(d,emit)=>{
+      const read=d.reads.get(payload.read_id),page=payload.page
+      if(!read||read.session_id!==session_id||read.kind!=='subtitles'||read.coverage.truncated||!Number.isInteger(page))return []
+      if(read.requires_delivery&&!Number.isSafeInteger(host_seq))return []
+      const source=read.sources[page-1];if(!source)return []
+      const text=this.store.getObject(source.object.hash).content.excerpt
+      if(payload.material_hash!==read.material.hash||payload.total_pages!==read.sources.length||payload.text!==text||payload.receipt_hash!==hash([read.id,page,source.object.hash,text]))return []
+      const pages=[...new Set([...(read.pages_presented??[]),page])].sort((a,b)=>a-b)
+      if(read.pages_presented?.includes(page))return [read.id]
+      const complete=pages.length===read.sources.length,next={...read,pages_presented:pages,body_complete:complete,last_page_host_seq:Number.isSafeInteger(host_seq)?Math.max(host_seq,read.last_page_host_seq??0):null,reading_complete:false}
+      emit('video.subtitle_page_presented',{read_id:read.id,page,total_pages:read.sources.length,object:source.object,host_seq,tool_call_id},{session_id,trace_id,decision_id:read.feed?.decision_id??null})
+      if(complete&&!read.requires_delivery)this.finishReading(d,emit,next,{session_id,trace_id,route,learn})
+      if(!complete||read.requires_delivery)d.reads.put(next);return [read.id]
+    })
+  }
+  finishReading(d,emit,read,{session_id,trace_id=null,route=null,learn=true,delivery=null}) {
+    const next={...read,reading_complete:true,read_completed_at:new Date(this.store.now()).toISOString(),learning_queued:read.learning_queued||learn,...(delivery?{delivery}: {})}
+    if(learn&&!read.learning_queued)this.queueSources(d,emit,read,{session_id,trace_id,route})
+    emit('video.subtitle_read_completed',{read_id:read.id,bvid:read.bvid,pages:read.pages_presented.length,source_ids:read.sources.map(s=>s.id),delivery,scope:delivery?'all_subtitle_pages_delivered_to_model':'all_subtitle_pages_in_native_tool_results'},{session_id,trace_id,decision_id:read.feed?.decision_id??null})
+    this.expose(d,emit,next,session_id);d.reads.put(next);settleVideoRead(d,emit,next,this.store.now())
+  }
+  acceptDelivery({session_id,through_seq,host_seq,route=null,learn=true}) {
+    if(!Number.isSafeInteger(through_seq)||!Number.isSafeInteger(host_seq))return []
+    const ids=this.store.journal.use(db=>db.prepare("SELECT id FROM video_reads WHERE json_extract(payload,'$.session_id')=? AND json_extract(payload,'$.requires_delivery')=1 AND json_extract(payload,'$.body_complete')=1 AND json_extract(payload,'$.reading_complete') IS NOT 1").all(session_id).map(r=>r.id))
+    return this.store.transaction({},(d,emit)=>{
+      const rows=ids.map(id=>d.reads.get(id)).filter(read=>read?.session_id===session_id&&read.body_complete&&!read.reading_complete)
+      const accepted=[]
+      for(const read of rows)if(Number.isSafeInteger(read.last_page_host_seq)&&through_seq>=read.last_page_host_seq) {
+        this.finishReading(d,emit,read,{session_id,trace_id:read.trace_id??null,route,learn,delivery:{through_seq,host_seq,last_page_host_seq:read.last_page_host_seq}});accepted.push(read.id)
       }
       return accepted
     })
@@ -160,13 +212,14 @@ export class VideoReads {
   resume(session_id,route=null) {
     return this.store.transaction({state:false},(d,emit)=>{
       for(const read of d.reads.awaiting(session_id)) {
+        if(read.read_policy&&read.kind==='subtitles'&&!read.reading_complete)continue
         this.queueSources(d,emit,read,{session_id,trace_id:read.trace_id??null,route})
         const next={...read,learning_queued:true};d.reads.put(next);settleVideoRead(d,emit,next,this.store.now())
       }
     })
   }
   seen() {
-    return this.store.journal.use(db=>db.prepare("SELECT DISTINCT bvid FROM video_reads WHERE kind='subtitles' AND status IN ('presented','assessed') ORDER BY bvid").all().map(r=>r.bvid))
+    return this.store.journal.use(db=>db.prepare("SELECT DISTINCT bvid FROM video_reads WHERE kind='subtitles' AND (json_extract(payload,'$.read_policy') IS NULL OR json_extract(payload,'$.reading_complete')=1) AND status IN ('presented','assessed') ORDER BY bvid").all().map(r=>r.bvid))
   }
   get(id) {
     return this.store.transaction({state:false},d=>d.reads.get(id))

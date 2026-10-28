@@ -267,6 +267,11 @@ test("actual subtitle receipt updates exploration exposure once; acquisition, se
     session_id: "fish",
     learn: false,
   });
+  assert.equal((await plan()).counts.revisit, 0);
+  assert.deepEqual(reads.seen(),[]);
+  await assert.rejects(engine.call('exploration_progress',{key:'premature',decision_id:d.id,outcome:'engaged',source_ids:['s0'],answered:'没有读正文',next_step:'跳过正文',reason:'应拒绝'}),/Read all subtitle pages/);
+  const page=await engine.call('video_read_page',{read_id:receipt.id,page:1});
+  await reads.acceptOutput(JSON.stringify(page),{session_id:'fish',learn:false});
   assert.equal((await plan()).counts.revisit, 1);
   assert.equal(store.events({ type: "exploration.exposed" }).length, 1);
   const exposed = store.state().concepts.decisions[d.id].exploration.exposure;
@@ -330,7 +335,7 @@ test("an empty owner profile cannot take budget from fish beliefs; all six short
   assert.equal(rendered.rendered[0].subject, "fish");
   assert.equal(rendered.rendered[0].selected.length, 6);
   assert.ok([...rendered.text].length <= 400);
-  assert.match(rendered.text, /feed_assess/);
+  assert.match(rendered.text, /exploration_next/);
   assert.equal(store.events({ type: "learning.context_admitted" }).length, 0);
 });
 
@@ -478,8 +483,99 @@ test('fixed MCP business operations complete feed stages and acquire real CLI su
  const rid=read.receipt_marker.split(':')[1],row=await new VideoReads(store).get(rid)
  assert.equal(row.feed.decision_id,selected.decisions[0].id);assert.equal(row.status,'acquired');assert.equal(row.kind,'subtitles')
  assert.equal(store.events({type:'exploration.exposed'}).length,0,'MCP API acquisition alone is not host receipt delivery')
+ const tracker=new VideoReads(store);await tracker.acceptOutput(read.receipt_marker,{session_id:'fish',learn:false})
+ assert.equal(store.events({type:'exploration.exposed'}).length,0,'metadata cannot create reading exposure')
+ const page=await call(reader,'video_read_page',{read_id:rid,page:1})
+ assert.match(page.text,/检验证据/)
+ await tracker.acceptOutput(JSON.stringify(page),{session_id:'fish',learn:false})
+ assert.equal(store.events({type:'exploration.exposed'}).length,1)
  await assert.rejects(engine.call('feed_run',{run_id:'bad',command:'arbitrary'}))
  await assert.rejects(engine.call('debrief_read',{bvid:'BV;bad',feed_run_id:args.run_id}))
  assert.ok(fs.readFileSync(requests,'utf8').split('\n').filter(Boolean).every(l=>JSON.parse(l).method==='GET'))
  await reader.close()
+})
+
+test('all real subtitle pages are required; forged, partial, foreign and replayed bodies cannot create exposure',async t=>{
+ const {store,engine,feed,args}=await fixture(t),pending=await feed.select(args)
+ await engine.call('feed_assess',{key:'judge-pages',run_id:'run',assessments:assessments(pending)})
+ const selected=await feed.resume({n:1,per:2}),decision=selected.decisions[0],reads=new VideoReads(store)
+ const started=await reads.start(decision.selected,{feed_run_id:'run'})
+ const acquired=await reads.complete(started.id,{bvid:decision.selected,cid:'123',duration:100,subtitles:Array.from({length:7},(_,i)=>({from:i*10,to:i*10+5,content:'证据'+String(i)+'方法'.repeat(900)}))})
+ await reads.acceptOutput(acquired.marker,{session_id:'fish',route:{provider:'deepseek-account',model:'fixture'}})
+ assert.equal(store.events({type:'learning.enqueued'}).length,0)
+ await reads.resume('fish');assert.equal(store.events({type:'learning.enqueued'}).length,0)
+ const first=await reads.page({read_id:acquired.id,page:1}),last=await reads.page({read_id:acquired.id,page:2})
+ assert.equal(first.total_pages,2)
+ for(const payload of [{...first,text:first.text.slice(0,100)},{...first,receipt_hash:'a'.repeat(64)},{...first,text:undefined}])assert.deepEqual(await reads.acceptOutput(JSON.stringify(payload),{session_id:'fish'}),[])
+ assert.deepEqual(await reads.acceptOutput(JSON.stringify(first),{session_id:'other'}),[])
+ await reads.acceptOutput(JSON.stringify(last),{session_id:'fish',host_seq:100,tool_call_id:'page-2'})
+ assert.equal(store.events({type:'exploration.exposed'}).length,0);assert.deepEqual(reads.seen(),[])
+ const restored=new VideoReads(new ObservationStore(store.directory))
+ await restored.acceptOutput(JSON.stringify(first),{session_id:'fish',host_seq:101,tool_call_id:'page-1'})
+ assert.equal(store.events({type:'exploration.exposed'}).length,0,'full body without model delivery is not exposure')
+ await restored.acceptDelivery({session_id:'other',through_seq:101,host_seq:102})
+ await restored.acceptDelivery({session_id:'fish',through_seq:100,host_seq:102})
+ assert.equal(store.events({type:'exploration.exposed'}).length,0)
+ await restored.acceptDelivery({session_id:'fish',through_seq:101,host_seq:103})
+ assert.equal(store.events({type:'exploration.exposed'}).length,1);assert.deepEqual(reads.seen(),[decision.selected])
+ assert.equal(store.events({type:'video.subtitle_read_completed'}).length,1)
+ assert.equal(store.events({type:'learning.enqueued'}).length,2)
+ await restored.acceptOutput(JSON.stringify(first),{session_id:'fish'})
+ assert.equal(store.events({type:'exploration.exposed'}).length,1)
+ const exposure=store.state().concepts.decisions[decision.id].exploration.exposure
+ await assert.rejects(engine.call('exploration_progress',{key:'foreign-source',decision_id:decision.id,outcome:'engaged',source_ids:['s0'],answered:'不匹配',next_step:'继续',reason:'拒绝跨视频来源'}),/this decision actual subtitle/)
+ await engine.call('exploration_progress',{key:'actual-pages',decision_id:decision.id,outcome:'engaged',source_ids:exposure.source_ids,answered:'正文中的证据与方法',remaining:'独立重复是否一致？',next_step:'找独立复核',reason:'实际完整正文'})
+ assert.equal(store.events({type:'exploration.exposed'}).length,1)
+ const long=await reads.start(decision.selected,{feed_run_id:'run'}),truncated=await reads.complete(long.id,{bvid:decision.selected,cid:'999',duration:1000,subtitles:Array.from({length:100},(_,i)=>({from:i,to:i+1,content:'长'.repeat(4000)}))})
+ await reads.acceptOutput(truncated.marker,{session_id:'fish'})
+ await assert.rejects(reads.page({read_id:long.id,page:1}),/Truncated/)
+ assert.equal(store.events({type:'exploration.exposed'}).length,1)
+})
+
+test('normal automatic cycle continues after missing subtitles, requires full reading and sourced questions, and resumes idempotently',async t=>{
+ const {nextExploration}=await import('../tools/lib/concept-system/auto-exploration.mjs')
+ const {store,engine}=await fixture(t),reads=new VideoReads(store);let invocations=0
+ const feed=async arg=>{invocations++;const f=new FeedConcepts({config,store,runId:arg.run_id,seed:arg.seed}),resumed=await f.resume({n:arg.n,per:arg.per});if(resumed)return resumed;const plan=await f.plan(['科学']);if(plan.status==='search_plan_required')return plan;return f.select({candidates:videos,legacy:videos,n:arg.n,per:arg.per})}
+ const options={feed,readConfig:()=>({...config,night:{maxVideos:2}})},next=()=>nextExploration(store,{cycle_id:'daily'},options)
+ async function prepare(){let out=await next();assert.equal(out.next_action,'feed_search_plan');await engine.call('feed_search_plan',{key:out.run_id,run_id:out.run_id,queries:['复核误差 方法'],reason:'正常问题检索'});out=await next();assert.equal(out.next_action,'feed_assess');await engine.call('feed_assess',{key:out.run_id,run_id:out.run_id,assessments:assessments(out.packet)});return next()}
+ let out=await prepare()
+ for(let i=0;i<2;i++){
+  assert.equal(out.next_action,'debrief_read');const attempt=await reads.start(out.arguments.bvid,{feed_run_id:out.run_id}),receipt=await reads.complete(attempt.id,{bvid:attempt.bvid,cid:'123',duration:10,description:'只有简介'})
+  await reads.acceptOutput(receipt.marker,{session_id:'fish'});out=await next()
+ }
+ assert.equal(out.round,2);assert.equal(out.next_action,'feed_search_plan');assert.equal(store.events({type:'exploration.exposed'}).length,0)
+ assert.equal(store.events({type:'exploration.cycle_continued'}).length,1)
+ out=await prepare();const attempt=await reads.start(out.arguments.bvid,{feed_run_id:out.run_id}),receipt=await reads.complete(attempt.id,{bvid:attempt.bvid,cid:'456',duration:30,subtitles:[{from:0,to:10,content:'独立重复检验会暴露不同的误差。'}]})
+ await reads.acceptOutput(receipt.marker,{session_id:'fish'});out=await next();assert.equal(out.next_action,'video_read_page')
+ const page=await engine.call(out.next_action,out.arguments);await reads.acceptOutput(JSON.stringify(page),{session_id:'fish'})
+ out=await next();assert.equal(out.next_action,'exploration_progress')
+ await engine.call('exploration_progress',{key:'daily-progress',decision_id:out.decision_id,outcome:'engaged',source_ids:out.source_ids,answered:'读到了独立重复与误差的关系',remaining:'误差从何而来？',next_step:'找方法细节',reason:'完整正文'})
+ out=await next();assert.equal(out.next_action,'exploration_question')
+ await engine.call('exploration_question',{key:'daily-question',collection_id:out.collection_id,source_ids:out.source_ids,question:'怎样控制独立重复中的测量误差？',next_step:'找测量控制实例',reason:'实际字幕未决问题'})
+ out=await next();assert.equal(out.status,'complete');const before=invocations
+ assert.deepEqual(await nextExploration(new ObservationStore(store.directory),{cycle_id:'daily'},options),out);assert.equal(invocations,before)
+ assert.equal(store.events({type:'exploration.cycle_completed'}).length,1)
+})
+
+test('automatic exploration bounds empty rounds, preserves exhaustion, and disabled mode makes no cycle writes',async t=>{
+ const {nextExploration}=await import('../tools/lib/concept-system/auto-exploration.mjs'),{store}=await fixture(t)
+ let calls=0;const options={feed:async()=>{calls++;return {status:'selected',selected:[]}},readConfig:()=>({...config,night:{maxVideos:2}})}
+ const exhausted=await nextExploration(store,{cycle_id:'empty'},options);assert.equal(exhausted.status,'exhausted');assert.equal(calls,3)
+ assert.deepEqual(await nextExploration(store,{cycle_id:'empty'},options),exhausted);assert.equal(calls,3)
+ assert.equal(store.events({type:'exploration.cycle_exhausted'}).length,1);assert.equal(store.events({type:'exploration.exposed'}).length,0)
+ const before=hash(store.state());assert.equal((await nextExploration(store,{cycle_id:'off'},{...options,readConfig:()=>({conceptSystem:{observe:false}})})).status,'disabled');assert.equal(hash(store.state()),before)
+ await store.transaction({key:'feed-select:stale-r1',input:'selected'},()=>({mode:'shadow',selected:[videos[0]]}))
+ const reads=new VideoReads(store),stale=await reads.start(videos[0].bv,{feed_run_id:'stale-r1'})
+ await store.transaction({state:false},d=>{const r=d.reads.get(stale.id);d.reads.put({...r,started_at:new Date(Date.now()-220000).toISOString()})})
+ const continued=await nextExploration(store,{cycle_id:'stale'},{...options,feed:async()=>({status:'selected',selected:[videos[0]]})})
+ assert.equal(continued.round,2);assert.equal(continued.next_action,'debrief_read');assert.equal((await reads.get(stale.id)).status,'failed')
+})
+
+test('automatic cycle advances a stale search instead of asking the model to reroll or reuse invalid judgments',async t=>{
+ const {nextExploration}=await import('../tools/lib/concept-system/auto-exploration.mjs'),{store,engine}=await fixture(t)
+ const options={readConfig:()=>config,feed:async arg=>new FeedConcepts({store,config,runId:arg.run_id,seed:arg.seed}).plan(['科学'])}
+ const first=await nextExploration(store,{cycle_id:'conflict'},options);assert.equal(first.round,1)
+ await engine.call('concept_propose',{key:'other-work',source:{id:'other-work',actor:'fish',type:'manual',excerpt:'刚收到另一个真实材料线索'},subject:'fish',content:'新的材料线索',tags:['topic']})
+ const next=await nextExploration(store,{cycle_id:'conflict'},options);assert.equal(next.round,2);assert.equal(next.next_action,'feed_search_plan')
+ assert.equal(store.events({type:'exploration.cycle_continued'}).at(-1).data.reason,'concept_state_changed_before_selection')
 })

@@ -31,7 +31,7 @@
 
 探索决策沿用 watch 场景，使它与问题线及原探索配置共用曝光窗口。deep 绑定真实活跃问题；revisit 绑定实际稀疏群；discover 只建立带真实候选材料来源的 pending 新词。
 
-`debrief <BV> --feed-run-id <run-id>` 产生物料回执；只有宿主在真实成功工具结果中接收了有效字幕回执，才自动追加 `exploration.exposed`，并把字幕来源写入同一库。下载成功、简介、待阅清单或模型自述都不会触发这项曝光。重复回执只计一次。它表示字幕材料实际进入宿主，不声称完整播放或理解了整个视频。
+`debrief <BV> --feed-run-id <run-id>` 产生物料回执；新 feed 必须通过 video_read_page 将全部正文页实际交给宿主，才自动追加 `exploration.exposed`，并把字幕来源写入同一库。下载成功、简介、待阅清单或模型自述都不会触发这项曝光。重复回执只计一次。它表示字幕材料实际进入宿主，不声称完整播放或理解了整个视频。
 
 模型随后调用 `exploration_progress`，引用已记录的实际来源，记录回答、剩余问题和下一步。自动曝光不占用这份反思记录，也不导致反思再次计数。需要继续深入时，用 `exploration_question` 建立有来源的问题线；不把旧历史决策自动改成未解决的新问题。
 
@@ -57,3 +57,13 @@ Desktop 的 create 可能返回不同于请求值的正式 sessionId。插件使
 固定业务 MCP 的客户端超时应为 240000ms（示例配置已更新），以覆盖实际检索和字幕读取；取消信号继续传递到子进程，不扩大终端或文件系统权限。
 
 后台学习在原生 turn/start 到 turn/end 之间不领取该会话任务；已开始的评估可以完成，但其验证结果延迟到会话空闲时应用，避免使正在进行的选片判断反复失效。带工具调用的模型消息仅保留原始审计，不把过程说明送入概念学习；独立的最终认识和实际字幕来源仍参与学习。
+
+## 日常调度与完整正文（subtitle-pages-v1）
+
+日常 `wakePrompt` 与手动业务调用共用 `exploration_next(cycle_id)` 状态机。cycle ID 由真实作息计划稳定生成，重试沿用，不拼接验收专用提示。状态机依次要求搜索规划、候选判断、实际清单、物料读取、正文分页、问题进展和回访后续问题；缺字幕、失败或截断会推进下一条，清单耗尽会继续新的真实搜索，最多三轮。预算耗尽记 `exploration.cycle_exhausted`，不伪造成功；成功记 `exploration.cycle_completed`。重启保留当前轮次和每条阅读状态。
+
+新 feed 决策带 `read_policy=subtitle-pages-v1`。`debrief_read` 的 marker 只证明取得/接收物料；不会计字幕曝光、加入已读排除集或提前将字幕送去学习。`video_read_page(read_id,page)` 返回固定来源对象里的完整正文，不接受任意文件路径；所有页都必须在原生成功工具结果中实际包含与对象逐字一致的正文及摘要校验值。伪造文本、只有 marker、截断输出、跨会话、漏页和重复页不能完成阅读。全部页实际接收后，DeepSeek 会话还须等真实提供方 delivery-accepted 的 throughSeq 覆盖最后一页正文，才记 `video.subtitle_read_completed` 和一次 `exploration.exposed`；之后才能提交引用同一字幕来源的 `exploration_progress`。deep 更新原问题的回答、未决点、下一步与来源；revisit 建立有字幕来源的后续问题后 cycle 才能完成。
+
+旧阅读、决策与历史事件保留原有语义，不回填新的“读完”回执。独立未绑定 feed 的旧 CLI 阅读兼容原协议；日常自动探索必须使用上述 feed 绑定协议。
+
+`night.readOnly` 默认 false；true 时普通日常唤醒仍完成探索、阅读与本地问题进展，但跳过收藏及对外消息/推送。shadow/disabled 保留原有非主动概念选片流程，不伪称完成主动探索闭环。

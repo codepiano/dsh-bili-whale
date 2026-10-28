@@ -32,7 +32,7 @@ export const DEFAULTS = {
   // 评论默认关；私信默认开，每 60 秒检查一次；同一人 30 天内只回复一次。
   listen: { comment: false, commentIntervalSec: 60, scope: 'both', oncePerPerson: true, allDay: false, dm: true, dmIntervalSec: 60, live: false, liveRoom: '', liveScope: 'owner' },
   // 作息：windows[] = 每天允许醒来的时段（每个窗口 = 一次机会）；maxWakesPerDay 缺省 = 窗口数（计划器上限 12）
-  night: { windows: [{ start: '20:00', end: '24:00', wakes: 1 }], skipChance: 0.3, minGapMin: 10, maxVideos: 5 },
+  night: { readOnly: false, windows: [{ start: '20:00', end: '24:00', wakes: 1 }], skipChance: 0.3, minGapMin: 10, maxVideos: 5 },
 }
 
 // 每次合并都返回独立对象，避免设置校验或调用方修改共享默认值。

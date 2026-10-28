@@ -244,6 +244,8 @@ export class ConceptEngine {
       );
     if (name === "exploration_query")
       return explorationQuery(get({ state: this.store.state() }), input);
+    if(name==='video_read_page')return new (await import('./video-reads.mjs')).VideoReads(this.store).page(input);
+    if(name==='exploration_next')return (await import('./auto-exploration.mjs')).nextExploration(this.store,input,{signal});
     if (name === "feed_run") return (await import('./operations.mjs')).runFeed(input,{signal});
     if (name === "debrief_read") return (await import('./operations.mjs')).readDebrief(input,{signal});
     if (name === "feed_search_plan")
@@ -590,7 +592,7 @@ export class ConceptEngine {
     let explorationGuidance = false;
     if (s.exploration && ["general", "watch"].includes(scene)) {
       const ratios = s.exploration.config.ratios;
-      const guide = `\n探索配比 ${Math.round(ratios.deep * 100)}/${Math.round(ratios.revisit * 100)}/${Math.round(ratios.discover * 100)}。按 feed→feed_search_plan→feed→feed_assess→feed 执行，沿用 run-id。立场判断须引用材料，阅读后记问题进展。`;
+      const guide = `\n探索配比 ${Math.round(ratios.deep * 100)}/${Math.round(ratios.revisit * 100)}/${Math.round(ratios.discover * 100)}。日常用 exploration_next，按 next_action 做 feed_assess 等操作，沿用 cycle_id。立场判断引用材料；正文逐页读完才记曝光与问题进展。`;
       if ([...(text + guide)].length <= budget) {
         text += guide;
         explorationGuidance = true;

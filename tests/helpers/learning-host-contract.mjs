@@ -23,17 +23,25 @@ const learning=createLearningHost({ctx,observer,config:()=>config,sessionIds:['f
   subject:job.source.type==='video'?'fish':'user',content:'康德 {{literal}}',tags:['topic'],scene:'general',triggers:[],exclusions:[],interpretation:'mention',
   quote:'康德',status:'accepted',reason:'原文提及',collections:['哲学阅读'],
 }]})})
-const events=attachSessionEvents(ctx,observer,'fish',{onEvent:learning.onEvent})
+let events=attachSessionEvents(ctx,observer,'fish',{onEvent:learning.onEvent})
 try {
-  const reads=new VideoReads(store),attempt=await reads.start('BV1234567890')
+  await store.transaction({key:'feed-select:contract',input:'native'},()=>({mode:'shadow',selected:[{bv:'BV1234567890'}]}))
+  const reads=new VideoReads(store),attempt=await reads.start('BV1234567890',{feed_run_id:'contract'})
   const receipt=await reads.complete(attempt.id,{bvid:'BV1234567890',cid:'123',duration:30,subtitles:[{from:0,to:4,content:'康德的思想'}]})
   ctx.emit('session/event',{id:'fish'},{type:'user/message',seq:1,time:Date.now(),data:{id:'owner-1',source:{kind:'user'},content:[{type:'text',text:'我最近想读康德'}]}})
-  ctx.emit('session/event',{id:'fish'},{type:'request/header',seq:2,time:Date.now(),data:{header:{config:{provider:'fixture',model:'fixture'}}}})
+  ctx.emit('session/event',{id:'fish'},{type:'request/header',seq:2,time:Date.now(),data:{header:{config:{provider:'deepseek-account',model:'fixture'}}}})
   ctx.emit('session/event',{id:'fish'},{type:'tool/result',seq:3,time:Date.now(),data:{turn:1,step:1,message:createToolResultMessage({callId:'debrief-1',content:[{type:'text',text:receipt.marker}],isError:false})}})
-  ctx.emit('session/event',{id:'fish'},{type:'turn/end',seq:4,time:Date.now(),data:{}})
+  await events.stop()
+  events=attachSessionEvents(ctx,observer,'fish',{onEvent:learning.onEvent})
+  assert.equal(store.events({type:'learning.enqueued'}).length,1,'metadata receipt does not enqueue the subtitle source')
+  const page=await reads.page({read_id:receipt.id,page:1})
+  ctx.emit('session/event',{id:'fish'},{type:'tool/result',seq:4,time:Date.now(),data:{turn:1,step:2,message:createToolResultMessage({callId:'page-1',content:[{type:'text',text:JSON.stringify(page)}],isError:false})}})
+  ctx.emit('session/event',{id:'fish'},{type:'session-log-deepseek/delivery-accepted',seq:5,time:Date.now(),data:{sessionId:'fish',throughSeq:4}})
+  ctx.emit('session/event',{id:'fish'},{type:'turn/end',seq:6,time:Date.now(),data:{}})
   await events.stop();await learning.worker.wake()
   assert.equal(store.events({type:'learning.completed'}).length,2)
   assert.equal((await reads.get(receipt.id)).status,'assessed')
+  assert.equal((await reads.get(receipt.id)).delivery.through_seq,4)
   const agent={session:{id:'fish'}}
   const assembly=await sp.assemble({agent})
   const text=renderContextSnapshot(sp.refreshContext(assembly,{agent}))
@@ -46,7 +54,7 @@ try {
   assert.equal(result.messages.length,0)
   config.conceptSystem.mode='shadow'
   assert.equal(renderContextSnapshot(await sp.assemble({agent})), '')
-  console.log(JSON.stringify({ok:true,node:process.versions.node,checks:['native Cordis event ingestion','native tool-result receipt ingestion','automatic video assessment','native SystemPrompt assemble/refresh/render','literal context','session isolation','empty-step termination preserved','shadow mode']}))
+  console.log(JSON.stringify({ok:true,node:process.versions.node,checks:['native Cordis event ingestion','native tool-result receipt ingestion','metadata cannot complete subtitle reading','full subtitle pages delivered before learning','automatic video assessment','native SystemPrompt assemble/refresh/render','literal context','session isolation','empty-step termination preserved','shadow mode']}))
 } finally {
   await events.stop();await learning.stop();fs.rmSync(root,{recursive:true,force:true})
 }

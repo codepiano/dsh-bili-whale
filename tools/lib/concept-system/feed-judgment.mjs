@@ -254,6 +254,7 @@ export async function selectJudged(
         const input = {
           feed_judgment: {
             policy: "stance-prior-v1",
+            read_policy:"subtitle-pages-v1",
             run_id: runId,
             assessment_object: run.assessment,
             material_scope: "candidate_metadata",
