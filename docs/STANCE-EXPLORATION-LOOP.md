@@ -70,3 +70,5 @@ Desktop 的 create 可能返回不同于请求值的正式 sessionId。插件使
 
 自动 cycle 的返回值附带完整 feed_arguments 和 continue_with；嵌套 packet.instructions 同步改为回到 exploration_next，不再残留手动 feed 协议的“原参数重跑 feed”指引，避免模型用 feed_run 默认 n/pool 导致指纹冲突并误入源码排查。
 `feed_search_plan`、`feed_assess` 自身的回执也识别归属 cycle，返回相同的 exploration_next 续接工具与参数，避免紧邻工具回执重新覆盖成手动 feed 指引；独立手动 run-id 保持原协议。
+
+自动 cycle 将候选判断拆成逐条：返回当前一个候选、完整立场列表和精确幂等 key；合格的单候选判断先归档，全部候选完成后再聚合算分。漏填立场、假引文不会被补成中性，也不能产生部分清单。独立手动 feed 保留原来的全量判断协议。active 日常提示与人设注入另加工具协议边界：旧 pref 仅作历史存档只读，原人设文件不修改，新选择和问题进展统一由学习库 MCP 记录。

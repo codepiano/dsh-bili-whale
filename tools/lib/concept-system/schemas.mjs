@@ -81,7 +81,7 @@ export const schemas = {
                   quote: z.string().min(1).max(500),
                 })
                 .strict(),
-              discovered_term: z.string().trim().min(1).max(100).optional(),
+              discovered_term: z.string().trim().max(100).optional(),
               stances: z
                 .array(
                   z

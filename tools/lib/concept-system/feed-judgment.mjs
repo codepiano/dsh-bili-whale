@@ -332,7 +332,8 @@ export async function assessFeed(store, input) {
         throw Error("Feed state changed; prepare a new run-id");
       const p = store.getObject(run.packet).content,
         seen = new Set();
-      if (input.assessments.length !== p.candidates.length)
+      const automatic=!!automaticContinuation(d.state,input.run_id).next_action;
+      if (input.assessments.length !== p.candidates.length && !(automatic&&input.assessments.length===1))
         throw Error("Assess every prepared candidate exactly once");
       for (const a of input.assessments) {
         const v = p.candidates.find((v) => v.bv === a.bvid);
@@ -344,7 +345,7 @@ export async function assessFeed(store, input) {
         if (!text.includes(a.exploration.quote))
           throw Error("Exploration quote is not in candidate material");
         if (a.stances.length !== p.stances.length)
-          throw Error("Assess every supplied stance, including neutral ones");
+          throw Error(`Assess every supplied stance, including neutral ones for ${a.bvid}; expected ${p.stances.map(s=>s.name+":"+s.member_id).join(", ")}`);
         for (const x of a.stances) {
           if (
             ids.has(x.member_id) ||
@@ -357,7 +358,7 @@ export async function assessFeed(store, input) {
             throw Error("Unknown or duplicate stance");
           ids.add(x.member_id);
           if (!text.includes(x.quote))
-            throw Error("Stance quote is not in candidate material");
+            throw Error(`Stance quote is not in candidate material: ${a.bvid}/${x.member_id}; neutral items may quote the exact candidate title`);
         }
         if (p.exploration?.path === "discover" && a.exploration.relevance > 0) {
           if (!a.discovered_term || !text.includes(a.discovered_term))
@@ -376,8 +377,20 @@ export async function assessFeed(store, input) {
             );
         }
       }
+      let assessments=input.assessments;
+      if(automatic) {
+        run.candidate_assessments??={};
+        for(const assessment of input.assessments) {
+          const existing=run.candidate_assessments[assessment.bvid];
+          if(existing&&store.getObject(existing).content.assessment.bvid===assessment.bvid&&hash(store.getObject(existing).content.assessment)!==hash(assessment))throw Error('Candidate already assessed; resume the cycle or start a new cycle')
+          if(!existing){const saved=store.object({assessment,at:store.now(),state_version:run.state_version});run.candidate_assessments[assessment.bvid]=saved.hash;emit('feed.candidate_assessed',{run_id:input.run_id,bvid:assessment.bvid,object:saved},{trace_id:'feed-'+hash(input.run_id).slice(0,32),source:'feed'})}
+        }
+        if(Object.keys(run.candidate_assessments).length<p.candidates.length)return {run_id:input.run_id,status:'partially_assessed',assessed:Object.keys(run.candidate_assessments).length,total:p.candidates.length,...automaticContinuation(d.state,input.run_id)};
+        assessments=p.candidates.map(v=>store.getObject(run.candidate_assessments[v.bv]).content.assessment);
+      }
       const object = store.object({
         ...input,
+        assessments,
         at: store.now(),
         attribution: "caller_reported_judgment",
         material_scope: "candidate_metadata_not_content_verification",

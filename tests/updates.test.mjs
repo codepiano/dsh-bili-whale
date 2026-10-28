@@ -124,5 +124,5 @@ test('night feed run-id survives delivery retries and differs between scheduled 
 test('ordinary scheduled wake uses the persistent reading loop and read-only mode excludes platform writes',()=>{
  const st={date:'2026-10-28',windowKey:'daily',atMs:123,wakes:0},normal=wakePrompt(st,'',3),readOnly=wakePrompt(st,'',3,'comment',{readOnly:true})
  assert.match(normal,/exploration_next/);assert.match(normal,/无字幕.*继续/);assert.match(normal,/video_read_page/);assert.match(normal,/全部页.*才自动计曝光/);assert.match(normal,/exploration_progress/)
- assert.doesNotMatch(normal,/验收/);assert.match(readOnly,/night.readOnly=true/);assert.doesNotMatch(readOnly,/--go|notify`|走【评论区/)
+ assert.doesNotMatch(normal,/验收/);assert.match(normal,/不执行旧 pref 脚本/);assert.match(readOnly,/night.readOnly=true/);assert.doesNotMatch(readOnly,/--go|notify`|走【评论区/)
 })
