@@ -8,6 +8,7 @@ import { ConceptEngine } from '../tools/lib/concept-system/engine.mjs'
 import { learningCatalog } from '../tools/lib/concept-system/catalog.mjs'
 import { LearningQueue, LearningWorker, validateEvaluation } from '../tools/lib/concept-system/learning.mjs'
 import { evaluateWithHost } from '../lib/learning-host.js'
+import { conceptMaintenanceSkill } from '../lib/concept-skill.js'
 
 const metadata={definition:'前端图形与可视化实现',boundary:'不收录无图形实现内容的泛前端话题',aliases:['前端可视化'],related:[]}
 const source={id:'reading-2',actor:'third_party',type:'video',excerpt:'数据可视化使用 three.js 绘制三维场景。',video:{bvid:'BV1234567890',cid:'1',section:'subtitles',part:1,parts:1,content_hash:'a'.repeat(64)}}
@@ -62,6 +63,7 @@ test('normal background learning actually delivers the directory to the model an
     offered=JSON.parse(options.messages[0].content[0].text)
     const existing=offered.catalog.inventory.find(c=>c.name==='three_js_visualization')
     assert.ok(existing);assert.match(options.system,/先对照已有群/)
+    assert.ok(options.system.includes(conceptMaintenanceSkill.content))
     assert.ok(offered.catalog.details.find(c=>c.id===existing.id).representatives.length)
     const output={candidates:[candidate([{collection_id:existing.id,reason:'数据可视化属于已有前端图形群，复用而不拆同义群'}])]}
     yield {type:'block-end',index:0,block:{type:'text',text:JSON.stringify(output)}}
@@ -78,6 +80,9 @@ test('normal background learning actually delivers the directory to the model an
   assert.equal(receipt.data.collection_id,a.id);assert.match(receipt.data.reason,/复用/)
   const req=store.events({type:'learning.request'})[0]
   assert.deepEqual(store.getObject(req.data.request.hash).content.catalog,offered.catalog)
+  const response=store.getObject(store.events({type:'learning.response'})[0].data.object.hash).content
+  assert.deepEqual(response.skill,{name:conceptMaintenanceSkill.name,hash:conceptMaintenanceSkill.hash})
+  assert.ok(response.policy.includes(conceptMaintenanceSkill.content))
 })
 test('new groups require full definitions and routing rejects unknown IDs, cross subjects and synonym names',async t=>{
   const {store,engine}=box(t),a=await seed(engine),catalog=learningCatalog(store.state().concepts,source)

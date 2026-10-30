@@ -38,7 +38,8 @@
     "BUGFIX-2026-10-25.md",
     "QR-LOGIN-2026-10-25.md",
     "docs",
-    "tools/observer-ui/dist"
+    "tools/observer-ui/dist",
+    "skills"
   ],
   "dsh": {
     "bundle": {

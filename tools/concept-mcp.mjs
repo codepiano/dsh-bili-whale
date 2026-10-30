@@ -8,6 +8,8 @@ import { redact } from "./lib/concept-system/store.mjs";
 const engine = new ConceptEngine(),
   server = new McpServer({ name: "bili-whale-concepts", version: "0.1.0" });
 const descriptions = {
+  video_knowledge_save:'把实际完整读完的视频内容总结、鱼自己的理解/想法和疑问保存到 Nowledge Mem 知识库。必须带真实 read_id 和来源逐字引文；按视频内容版本幂等写入并实际读回验证，返回 memory_id；不修改概念群、曝光、奖励或主人偏好。',
+  video_knowledge_get:'按真实已读 read_id 从 Nowledge Mem 读回知识总结及 memory_id；不把本地概念群当知识正文。',
   persona_revision_retry:'用原始已完成来源重新排队一次已耗尽的反思，必须给出 attempt_id、当前 persona 哈希和理由。原失败记录保留，不接收伪造经历或指定修改内容，由正常后台重新判断。',
   persona_revision_history:'查看 persona 当前文件、哈希、自动修订/回滚版本、来源与修改理由；不修改文件。',
   persona_revision_rollback:'将指定修订恢复到修改前；必须携带当前文件 expected_hash 和理由。保留新回滚版本与原历史，拒绝覆盖未知外部修改。',
@@ -54,6 +56,7 @@ const descriptions = {
     "显式归档已返回的 DS 正文和可用推理；必须指向已准备提示，不伪造推理。",
 };
 const readonly = new Set([
+  "video_knowledge_get",
   'persona_revision_history',
   'concept_catalog',
   "exploration_plan",
@@ -74,7 +77,7 @@ for (const [name, inputSchema] of Object.entries(schemas))
       annotations: {
         readOnlyHint: readonly.has(name),
         destructiveHint: false,
-        openWorldHint: ["feed_run","debrief_read","video_audio_status","video_read_frames","exploration_next"].includes(name),
+        openWorldHint: ["feed_run","debrief_read","video_audio_status","video_read_frames","exploration_next","video_knowledge_save","video_knowledge_get"].includes(name),
       },
     },
     async (args, extra) => {
