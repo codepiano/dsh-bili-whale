@@ -22,14 +22,16 @@ description: 鱼在实际读完视频字幕或转写正文后，将内容总结�
 
 概念群服务决策与兴趣生成；Nowledge Mem 是鱼的知识库，保存读了什么、内容总结与自己的理解/想法。不能把概念标签入库、会话归档或本地日记写入当成知识库已经保存。
 
-主会话完整阅读每条视频后，先用 `video_knowledge_get({read_id})` 查本内容版本是否已存。没有时，用 `video_knowledge_save` 提交 `read_id`、20–4000字的 `summary`、可为空的 `thoughts`、`questions` 数组，以及至少一条 `{source_id,quote}` 原文依据；按工具实际 schema 调用。总结用自己的话概括重要内容与论证；thoughts 是鱼的理解、取舍、联想或异议，不是把作者观点冒充自己的确定事实。允许暂无额外想法。工具按内容版本幂等写入 Mem 并实际读回；只有拿到 verified/memory_id 才报告保存成功。失败保留真实缺口，沿当前回合或下次正常阅读重试，不新建日调度。后台结构化学习不调用此工具、不伪报 Mem 保存。
+同一视频可以保存一条内容总览、若干独立想法，必要时保存可检索的文字稿；不规定每视频只能一篇。文字稿须标明平台字幕/音频转写、版本、是否校对，整理标点不等于纠正事实。先按视频链接/BV 在 Nowledge Mem 查已有内容，避免另写重复记录；已有知识可沿实际 Mem 接口修订、补充或关联。
+
+`video_knowledge_save` 是带真实阅读校验的初始总览保存工具，不限制其他独立知识条目。主会话完整阅读每条视频后，先用 `video_knowledge_get({read_id})` 查本内容版本是否已存。没有时，用 `video_knowledge_save` 提交 `read_id`、20–4000字的 `summary`、可为空的 `thoughts`、`questions` 数组，以及至少一条 `{source_id,quote}` 原文依据；按工具实际 schema 调用。总结用自己的话概括重要内容与论证；thoughts 是鱼的理解、取舍、联想或异议，不是把作者观点冒充自己的确定事实。允许暂无额外想法。工具按内容版本幂等写入 Mem 并实际读回；只有拿到 verified/memory_id 才报告保存成功。失败保留真实缺口，沿当前回合或下次正常阅读重试，不新建日调度。后台结构化学习不调用此工具、不伪报 Mem 保存。
 
 ## 提取什么，存在哪里
 
 | 内容 | 形式与证据 | 去向 |
 | --- | --- | --- |
 | 内容总结与想法 | 视频标题/链接/BV、实际阅读范围，内容总结、鱼的理解/想法与待查问题，真实引句和来源 ID | Nowledge Mem；用 video_knowledge_save 保存，video_knowledge_get 实际读回；本地只保留关联/控制回执 |
-| 材料原文 | 真实 source_id、BV/CID、正文种类、版本、分段与原文引句；引文必须能在来源中定位 | 现有视频来源/读取记录，引用原 ID，不另造来源或用日记替代正文存档 |
+| 材料原文 | 真实 source_id、BV/CID、正文种类、版本、分段与原文引句；引文必须能在来源中定位 | 原始来源/读取记录保留审计；有用或用户要求时也可将文字稿写入 Nowledge Mem，引用原 ID 并标注来源，不用日记替代知识存档 |
 | 新概念与可用表达 | 简短、可独立理解的 `content`；合适的 topic/word/phrase/idiom/sentence_pattern 标签、解释状态、原文 quote、归属及理由 | 学习库候选与概念群；后台返回 candidates，由宿主 propose/review，前台确需补充才用 concept_propose/concept_review |
 | 群的范围与关联 | definition、boundary、aliases、related，附本群已有 source_ids 和修改理由 | concept_catalog_update；后台当前契约不支持改旧群元数据，不能伪报已修改 |
 | 尚未解决的问题 | 已知什么、仍缺什么、下一步找什么证据，关联真实 collection/source/read/decision ID | exploration_question；实际读完后按 exploration_next 要求用 exploration_progress 记录真实回答与剩余问题 |
