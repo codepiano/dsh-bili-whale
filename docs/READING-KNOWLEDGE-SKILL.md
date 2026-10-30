@@ -1,6 +1,6 @@
 # 鱼的阅读后技能与知识库
 
-专属 skill 源文件在 `skills/fish-concept-maintenance/SKILL.md`。部署时仅复制到鱼的 cwd 下 `.agents/skills/fish-concept-maintenance/SKILL.md`，不安装到 Codex/DSH 全局目录。后台学习直接加载同一版本，响应回执记录 skill 名称和内容 SHA256。
+专属 skill 源文件在 `skills/fish-concept-maintenance/SKILL.md`。部署时仅复制到鱼的 cwd 下 `.agents/skills/fish-concept-maintenance/SKILL.md`，不安装到 Codex/DSH 全局目录。鱼插件同时注册按鱼 cwd 过滤的原生技能提供器，即使全局 filesystem/tool-skill 关闭仍可发现本技能，并通过阅读后的原生上下文提供正文；不改变其他会话的全局开关。后台学习直接加载同一版本，响应回执记录 skill 名称和内容 SHA256。
 
 概念群服务决策、兴趣、探索目标与归属；Nowledge Mem 是知识库，保存具体读了什么、内容总结、鱼自己的理解/想法与待查问题。日记是生活/反思记录，既不替代知识库，也不把第三方观点直接变成主人偏好或 persona。
 
