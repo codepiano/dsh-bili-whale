@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import { hash, redact } from './store.mjs'
 
 export function pendingVideoKnowledge(store,session_id) {
-  return store.journal.use(db=>db.prepare("SELECT payload FROM video_reads WHERE json_extract(payload,'$.session_id')=? AND json_extract(payload,'$.reading_complete')=1 ORDER BY rowid DESC").all(session_id).map(r=>JSON.parse(r.payload)).filter(r=>!r.coverage?.truncated&&['subtitles','audio_transcript'].includes(r.kind)&&r.knowledge?.status!=='saved').slice(0,5).map(r=>({read_id:r.id,bvid:r.bvid,title:store.getObject(r.material.hash).content.title,source_ids:r.sources.map(s=>s.id)})))
+  return store.journal.use(db=>db.prepare("SELECT payload FROM video_reads WHERE json_extract(payload,'$.session_id')=? AND json_extract(payload,'$.reading_complete')=1 ORDER BY rowid DESC").all(session_id).map(r=>JSON.parse(r.payload)).filter(r=>!r.coverage?.truncated&&['subtitles','audio_transcript'].includes(r.kind)&&r.knowledge?.status!=='saved').slice(0,5).map(r=>({read_id:r.id,bvid:r.bvid,title:store.getObject(r.material.hash).content.title,source_ids:r.sources.map(s=>s.id),...(r.knowledge?.draft?{retry_draft:store.getObject(r.knowledge.draft.hash).content}:{})})))
 }
 async function runNmem(args,content,signal) {
   const cli=process.env.NMEM_CLI_PATH||(fs.existsSync('/usr/local/bin/nmem')?'/usr/local/bin/nmem':'nmem')
@@ -45,7 +45,7 @@ export class VideoKnowledge {
     ].join('\n\n'))
     const content_hash=hash(content)
     if(read.knowledge?.content_hash&&read.knowledge.content_hash!==content_hash)throw Error('Pending knowledge already has a different draft; retry the original draft')
-    await this.store.transaction({state:false},(d,emit)=>{const current=d.reads.get(read.id);if(current.knowledge?.content_hash&&current.knowledge.content_hash!==content_hash)throw Error('Knowledge draft conflict');d.reads.put({...current,knowledge:{status:'pending',memory_id,content_hash}});emit('knowledge.write_requested',{read_id:read.id,memory_id,content_hash,request:this.store.object({content})},{session_id:read.session_id})})
+    await this.store.transaction({state:false},(d,emit)=>{const current=d.reads.get(read.id);if(current.knowledge?.content_hash&&current.knowledge.content_hash!==content_hash)throw Error('Knowledge draft conflict');d.reads.put({...current,knowledge:{status:'pending',memory_id,content_hash,draft:this.store.object(input)}});emit('knowledge.write_requested',{read_id:read.id,memory_id,content_hash,request:this.store.object({content})},{session_id:read.session_id})})
     // Stable content identity makes timeout/retry an upsert, never a second memory.
     await this.run(['memories','add','--stdin','--id',memory_id,'--title',`鱼读视频：${title||read.bvid}`,'--source','dsh-bili-whale','--source-app','deepseek-harness','--label','fish-reading'],content,signal)
     const result=await this.get({read_id:read.id},{signal})
