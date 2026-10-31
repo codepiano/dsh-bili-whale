@@ -16,7 +16,7 @@ function automaticContinuation(state,run_id) {
 export function stanceMembers(state) {
   if (!state) return [];
   return Object.values(state.collections)
-    .filter((c) => c.subject === "fish")
+    .filter((c) => !c.archived_at && c.subject === "fish")
     .flatMap((c) =>
       c.members.map((id) => ({ collection: c, member: state.members[id] })),
     )

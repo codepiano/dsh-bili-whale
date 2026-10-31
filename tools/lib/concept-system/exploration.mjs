@@ -76,13 +76,14 @@ export function explorationPlan(s, input, now) {
         q.subject === input.subject &&
         q.scene === input.scene &&
         q.status === "active" &&
+        !s.collections[q.collection_id]?.archived_at &&
         s.collections[q.collection_id]?.subject === input.subject &&
         evidence(s, s.collections[q.collection_id], input.scene).length,
     )
     .sort((a, b) => b.updated_at - a.updated_at || a.id.localeCompare(b.id));
   const groups = Object.values(s.collections)
     .filter(
-      (c) => c.subject === input.subject && evidence(s, c, input.scene).length,
+      (c) => !c.archived_at && c.subject === input.subject && evidence(s, c, input.scene).length,
     )
     .map((c) => {
       const sources = evidence(s, c, input.scene);
@@ -91,7 +92,7 @@ export function explorationPlan(s, input, now) {
         Object.values(s.collections)
           .filter(
             (other) =>
-              other.subject === c.subject &&
+              !other.archived_at && other.subject === c.subject &&
               hash(evidence(s, other, input.scene)) === hash(sources),
           )
           .map((other) => other.id),

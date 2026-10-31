@@ -54,7 +54,7 @@ export class ObserverReader {
         counts: {
           collections: db
             .prepare(
-              "SELECT count(*) AS n FROM concept_entities WHERE kind='collections'",
+              "SELECT count(*) AS n FROM concept_entities WHERE kind='collections' AND json_extract(payload,'$.archived_at') IS NULL",
             )
             .get().n,
           previews: db.prepare("SELECT count(*) AS n FROM previews").get().n,
@@ -104,7 +104,7 @@ export class ObserverReader {
   collections({ page = 1, limit = 12, subject = "", query = "" } = {}) {
     return this.use(
       (db) => {
-        const where = ["kind='collections'"],
+        const where = ["kind='collections'", "json_extract(payload,'$.archived_at') IS NULL"],
           args = [];
         if (subject) {
           where.push("json_extract(payload,'$.subject')=?");

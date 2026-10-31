@@ -31,7 +31,7 @@ function rank(state,c,query) {
   return tokens(query).reduce((n,t)=>n+(text.includes(t)?1:0),0)
 }
 export function catalogQuery(state,{subject,query='',page=1,limit=20}={}) {
-  const all=Object.values(state.collections ?? {}).filter(c=>!subject||c.subject===subject)
+  const all=Object.values(state.collections ?? {}).filter(c=>!c.archived_at&&(!subject||c.subject===subject))
     .map(c=>({c,score:query?rank(state,c,query):0}))
     .filter(row=>!query||row.score>0)
     .sort((a,b)=>b.score-a.score||a.c.id.localeCompare(b.c.id))
@@ -42,7 +42,7 @@ export function catalogQuery(state,{subject,query='',page=1,limit=20}={}) {
 // groups: the caller must defer instead of claiming there is no suitable group.
 export function learningCatalog(state,source) {
   const subjects=source.actor==='user'?['user','fish']:['fish']
-  const groups=Object.values(state.collections ?? {}).filter(c=>subjects.includes(c.subject)).sort((a,b)=>a.id.localeCompare(b.id))
+  const groups=Object.values(state.collections ?? {}).filter(c=>!c.archived_at&&subjects.includes(c.subject)).sort((a,b)=>a.id.localeCompare(b.id))
   const inventory=[];let bytes=0
   for(const c of groups) {
     const row={id:c.id,subject:c.subject,name:c.name,aliases:c.aliases ?? []}

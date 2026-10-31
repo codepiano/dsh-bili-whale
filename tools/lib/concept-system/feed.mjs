@@ -9,7 +9,7 @@ const normalized=s=>String(s??'').normalize('NFKC').toLowerCase().trim()
 const useful=s=>([...String(s)].length>=2||/^\p{Script=Han}$/u.test(String(s))) && [...String(s)].length<=24
 export function feedGroups(state) {
   if(!state)return []
-  return Object.values(state.collections).filter(c=>c.subject==='fish').map(c=>({
+  return Object.values(state.collections).filter(c=>!c.archived_at&&c.subject==='fish').map(c=>({
     collection:c,
     members:c.members.map(id=>state.members[id]).filter(m=>m?.status==='accepted'&&m.subject==='fish'&&
       m.tags.includes('topic')&&['explicit','mention'].includes(m.interpretation)&&['general',scene].includes(m.scene)),

@@ -7,6 +7,9 @@ import http from "node:http";
 import { observerFixture } from "./helpers/observer-fixture.mjs";
 import { startObserverServer } from "../tools/lib/observer-server.mjs";
 import { ObserverReader } from "../tools/lib/concept-system/observer-read.mjs";
+import { feedGroups } from "../tools/lib/concept-system/feed.mjs";
+import { stanceMembers } from "../tools/lib/concept-system/feed-judgment.mjs";
+import { ConceptEngine } from "../tools/lib/concept-system/engine.mjs";
 import { hash } from "../tools/lib/concept-system/store.mjs";
 import { lineChanges } from "../tools/observer-ui/src/diff.mjs";
 function box(t) {
@@ -203,3 +206,19 @@ test("line diff handles additions, removals, unchanged text, JSON and large cont
   assert.equal(lineChanges(null, { a: 1 }).added, 3);
   assert.equal(lineChanges("x".repeat(400001), "").limited, true);
 });
+
+test('archived empty groups stay out of the active catalog and page but retain detail and can be reused',async t=>{
+  const root=box(t),f=await observerFixture(root),reader=new ObserverReader(root),engine=new ConceptEngine(f.store)
+  const before=reader.overview().counts.collections,c=reader.collection(f.a.group),member=c.items[0]
+  await f.store.transaction({},d=>{const c=d.state.concepts.collections[f.a.group];c.archived_at=1;c.archive_reason='reviewed cleanup'})
+  assert.equal(reader.overview().counts.collections,before-1)
+  assert.ok(!feedGroups(f.store.state().concepts).some(g=>g.collection.id===f.a.group))
+  assert.ok(!stanceMembers(f.store.state().concepts).some(g=>g.collection.id===f.a.group))
+  assert.ok(!(await engine.call('personal_render',{subject:member.subject,scene:'general',budget:2000})).selected.includes(member.id))
+  assert.ok(!reader.collections().items.some(c=>c.id===f.a.group))
+  assert.ok(!(await engine.call('concept_catalog')).items.some(c=>c.id===f.a.group))
+  assert.equal(reader.collection(f.a.group).archive_reason,'reviewed cleanup')
+  await engine.call('concept_review',{key:'revive',candidate_id:member.id,status:'accepted',reason:'真实新归属',collections:[{collection_id:f.a.group}]})
+  assert.equal(reader.overview().counts.collections,before)
+  assert.ok(reader.collections().items.some(c=>c.id===f.a.group))
+})

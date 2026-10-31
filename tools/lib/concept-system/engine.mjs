@@ -350,6 +350,8 @@ export class ConceptEngine {
               curiosity: 0,
               created_at: now,
             });
+            delete c.archived_at;
+            delete c.archive_reason;
             if (!c.members.includes(m.id)) c.members.push(m.id);
             c.related = [...new Set([...c.related, ...spec.related])];
             if(spec.definition&&!existing)applyCatalogMetadata(state,c,spec,{source_ids:[m.source_id],reason:spec.reason??input.reason,at:now});
@@ -532,7 +534,7 @@ export class ConceptEngine {
               m.content.includes(input.query) ||
               m.triggers.some((t) => t.includes(input.query)) ||
               Object.values(s.collections).some(
-                (c) => c.name.includes(input.query) && c.members.includes(m.id),
+                (c) => !c.archived_at && c.name.includes(input.query) && c.members.includes(m.id),
               )),
         )
         .slice(0, input.limit);
@@ -540,7 +542,7 @@ export class ConceptEngine {
       state_version: revision(s),
       members,
       collections: Object.values(s.collections)
-        .filter((c) => c.members.some((id) => members.some((m) => m.id === id)))
+        .filter((c) => !c.archived_at && c.members.some((id) => members.some((m) => m.id === id)))
         .map((c) => ({ ...c, strength: collectionStrength(c, s) })),
     };
   }
@@ -594,7 +596,7 @@ export class ConceptEngine {
       ranked = Object.values(s.collections)
         .filter(
           (c) =>
-            c.subject === subject &&
+            !c.archived_at && c.subject === subject &&
             c.members.some((id) => s.members[id]?.status === "accepted"),
         )
         .sort(
