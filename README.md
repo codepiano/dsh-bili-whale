@@ -11,11 +11,11 @@
 
 后续开发草案：[概念集合与偏好系统设计](docs/CONCEPT-SYSTEM-DESIGN.md) · [决策观察与关键文件版本设计](docs/DECISION-OBSERVABILITY.md)。设计约定与当前实现边界见 [第一版使用与验证](docs/CONCEPT-SYSTEM-V1.md)、[概念群目录与归属](docs/CONCEPT-CATALOG.md)；开发分支内容不代表已安装或发布。
 
-宿主接入：[自动入队、回合后评估与每次调用前注入](docs/AUTOMATIC-LEARNING.md)。启用后由程序驱动学习，无需逐次提醒或要求 DS 主动调用 MCP；默认仍关闭观察，shadow 仅学习与记录，active 才注入日常输入。
+宿主接入：[概念维护与宿主观察](docs/AUTOMATIC-LEARNING.md)。后台自动提炼已停用，由鱼在主会话查重后直接维护概念；观察记录与已有概念上下文保留，shadow 记录预览，active 注入日常输入。
 
 选题接入：[feed 概念群与兴趣竞争](docs/FEED-INTEREST-COMPETITION.md)。active 下，兴趣竞争影响搜索与阅读清单，疲劳逐项更新，接近候选使用有界扰动；shadow 只记录选题预演。平台请求只读，本地会保存决策和疲劳。
 
-读取回流：[debrief 材料回执与概念学习](docs/DEBRIEF-LEARNING-LOOP.md)。保存字幕/云端音频转写/简介证据，宿主验证工具回执后自动入队，回合结束后评估；区分材料取得、会话引用与概念评估，避免把备素材说成看完整片。
+读取回流：[debrief 材料回执与概念学习](docs/DEBRIEF-LEARNING-LOOP.md)。保存字幕/云端音频转写/简介证据，宿主验证并记录工具回执，由鱼实际阅读后直接维护概念；区分材料取得、会话引用与概念评估，避免把备素材说成看完整片。
 
 ## ⚠️ 默认值是按「刚创的小号」定的（先看这个）
 

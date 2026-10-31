@@ -22,30 +22,20 @@ async function capture(reads,over={}){const read=await reads.start(bv);return re
 function host(){const hooks=new Map();return {hooks,on(k,fn){hooks.set(k,fn);return ()=>hooks.delete(k)}}}
 const tool=marker=>({type:'tool/result',seq:5,data:{message:{id:'tool-1',source:{kind:'tool',callId:'call-1'},content:[{type:'text',text:marker}]}}})
 
-test('acquired, presented and assessed are distinct; successful learning produces new feed interest without rewards',async t=>{
-  const {store,reads}=setup(t),receipt=await capture(reads)
-  assert.equal((await reads.get(receipt.id)).status,'acquired');assert.deepEqual(reads.seen(),[])
-  assert.equal(store.events({type:'learning.enqueued'}).length,0)
-  const ctx=host(),cfg={conceptSystem:{observe:true,learning:true,mode:'active',renderBudget:400}}
-  const learning=createLearningHost({ctx,observer:new Observer({store,paths:{}}),config:()=>cfg,sessionIds:['fish'],start:false,evaluate:async job=>{
-    assert.equal(job.source.actor,'third_party');assert.equal(job.source.type,'video');assert.equal(job.source.video.bvid,bv)
-    return evaluation()
-  }})
+test('host records material delivery without automatic extraction or new feed concepts',async t=>{
+  const {store,reads}=setup(t),receipt=await capture(reads),ctx=host()
+  let calls=0
+  const learning=createLearningHost({ctx,observer:new Observer({store,paths:{}}),config:()=>({conceptSystem:{observe:true,learning:true,mode:'active',renderBudget:400}}),sessionIds:['fish'],evaluate:async()=>{calls++;return evaluation()}})
+  t.after(()=>learning.stop())
   await learning.onEvent({id:'fish'},{type:'request/header',data:{header:{config:route}}})
   await learning.onEvent({id:'fish'},tool(receipt.marker),{trace_id:'host-trace'})
-  assert.equal((await reads.get(receipt.id)).status,'presented');assert.deepEqual(reads.seen(),[bv])
-  assert.equal(store.events({type:'candidate.proposed'}).length,0)
   await learning.onEvent({id:'fish'},{type:'turn/end',data:{}});await learning.worker.wake()
-  assert.equal((await reads.get(receipt.id)).status,'assessed')
-  const source=Object.values(store.state().concepts.sources)[0]
-  assert.equal(source.video.section,'subtitles');assert.equal(source.ref,'bili:'+bv)
-  const collection=Object.values(store.state().concepts.collections)[0]
-  assert.equal(collection.reward,0);assert.equal(collection.affinity,0)
-  const feed=new FeedConcepts({config:cfg,store,runId:'after-reading'})
-  assert.ok((await feed.plan(['AI'])).keywords.includes('康德'))
-  const known={bv:'BV0000000001',t:'康德的认识论',_score:0,_hits:[]},old={bv:'BV0000000002',t:'AI',_score:20,_hits:['AI']}
-  assert.equal((await feed.select({candidates:[old,known],legacy:[old,known],n:1,per:2})).selected[0].bv,known.bv)
-  await learning.stop()
+  assert.equal((await reads.get(receipt.id)).status,'presented')
+  assert.deepEqual(reads.seen(),[bv])
+  assert.equal(calls,0)
+  assert.equal(store.events({type:'learning.enqueued'}).length,0)
+  assert.equal(store.events({type:'candidate.proposed'}).length,0)
+  assert.equal(store.events({type:'video.material_presented'}).length,1)
 })
 
 test('unbound, forged, failed-tool and unrelated-session markers cannot enqueue sources',async t=>{
@@ -118,7 +108,7 @@ test('third-party content cannot become endorsed beliefs, motives or user intere
   assert.doesNotThrow(()=>validateEvaluation(neg,source))
 })
 
-test('pausing learning still records receipt delivery; reenabling resumes assessment automatically',async t=>{
+test('learning toggle still records receipt delivery and cannot reactivate extraction',async t=>{
   const {store,reads}=setup(t),receipt=await capture(reads),ctx=host(),cfg={conceptSystem:{observe:true,learning:false}}
   let calls=0
   const learning=createLearningHost({ctx,observer:new Observer({store,paths:{}}),config:()=>cfg,sessionIds:['fish'],start:false,evaluate:async()=>{calls++;return evaluation()}})
@@ -127,7 +117,7 @@ test('pausing learning still records receipt delivery; reenabling resumes assess
   assert.equal((await reads.get(receipt.id)).status,'presented');assert.equal(calls,0);assert.deepEqual(reads.seen(),[bv])
   cfg.conceptSystem.learning=true
   await learning.onEvent({id:'fish'},{type:'turn/end',data:{}});await learning.worker.wake()
-  assert.equal(calls,1);assert.equal((await reads.get(receipt.id)).status,'assessed')
+  assert.equal(calls,0);assert.equal((await reads.get(receipt.id)).status,'presented')
   await learning.stop()
 })
 

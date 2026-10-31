@@ -8,6 +8,7 @@ import path from 'node:path'
 import {ObservationStore} from '../../tools/lib/concept-system/store.mjs'
 import {Observer,attachSessionEvents} from '../../tools/lib/concept-system/observation.mjs'
 import {createLearningHost} from '../../lib/learning-host.js'
+import {ConceptEngine} from '../../tools/lib/concept-system/engine.mjs'
 import {VideoReads} from '../../tools/lib/concept-system/video-reads.mjs'
 
 if(!process.env.BILI_DSH_ASAR)throw Error('Set BILI_DSH_ASAR to the installed host archive')
@@ -33,15 +34,20 @@ try {
   ctx.emit('session/event',{id:'fish'},{type:'tool/result',seq:3,time:Date.now(),data:{turn:1,step:1,message:createToolResultMessage({callId:'debrief-1',content:[{type:'text',text:receipt.marker}],isError:false})}})
   await events.stop()
   events=attachSessionEvents(ctx,observer,'fish',{onEvent:learning.onEvent})
-  assert.equal(store.events({type:'learning.enqueued'}).length,1,'metadata receipt does not enqueue the subtitle source')
+  assert.equal(store.events({type:'learning.enqueued'}).length,0,'host messages and metadata do not enqueue extraction')
   const page=await reads.page({read_id:receipt.id,page:1})
   ctx.emit('session/event',{id:'fish'},{type:'tool/result',seq:4,time:Date.now(),data:{turn:1,step:2,message:createToolResultMessage({callId:'page-1',content:[{type:'text',text:JSON.stringify(page)}],isError:false})}})
   ctx.emit('session/event',{id:'fish'},{type:'session-log-deepseek/delivery-accepted',seq:5,time:Date.now(),data:{sessionId:'fish',throughSeq:4}})
   ctx.emit('session/event',{id:'fish'},{type:'turn/end',seq:6,time:Date.now(),data:{}})
   await events.stop();await learning.worker.wake()
-  assert.equal(store.events({type:'learning.completed'}).length,2)
-  assert.equal((await reads.get(receipt.id)).status,'assessed')
+  assert.equal(store.events({type:'learning.completed'}).length,0)
+  assert.equal(store.events({type:'learning.enqueued'}).length,0)
+  assert.equal((await reads.get(receipt.id)).status,'presented')
+  assert.equal((await reads.get(receipt.id)).reading_complete,true)
   assert.equal((await reads.get(receipt.id)).delivery.through_seq,4)
+  const engine=new ConceptEngine(store)
+  const m=await engine.call('concept_propose',{key:'foreground',subject:'user',content:'康德 {{literal}}',tags:['topic'],scene:'general',triggers:[],exclusions:[],interpretation:'mention',source:{id:'foreground-source',actor:'user',type:'conversation',excerpt:'我最近想读康德',ref:'fixture:owner'}})
+  await engine.call('concept_review',{key:'foreground',candidate_id:m.id,status:'accepted',reason:'原文提及',collections:[{name:'哲学阅读'}]})
   const agent={session:{id:'fish'}}
   const assembly=await sp.assemble({agent})
   const text=renderContextSnapshot(sp.refreshContext(assembly,{agent}))
@@ -54,7 +60,7 @@ try {
   assert.equal(result.messages.length,0)
   config.conceptSystem.mode='shadow'
   assert.equal(renderContextSnapshot(await sp.assemble({agent})), '')
-  console.log(JSON.stringify({ok:true,node:process.versions.node,checks:['native Cordis event ingestion','native tool-result receipt ingestion','metadata cannot complete subtitle reading','full subtitle pages delivered before learning','automatic video assessment','native SystemPrompt assemble/refresh/render','literal context','session isolation','empty-step termination preserved','shadow mode']}))
+  console.log(JSON.stringify({ok:true,node:process.versions.node,checks:['native Cordis event ingestion','native tool-result receipt ingestion','metadata cannot complete subtitle reading','full subtitle pages delivered before learning','background extraction disabled; foreground concepts render','native SystemPrompt assemble/refresh/render','literal context','session isolation','empty-step termination preserved','shadow mode']}))
 } finally {
   await events.stop();await learning.stop();fs.rmSync(root,{recursive:true,force:true})
 }

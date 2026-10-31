@@ -5,6 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { ObservationStore } from '../tools/lib/concept-system/store.mjs'
 import { Observer, attachSessionEvents } from '../tools/lib/concept-system/observation.mjs'
+import { ConceptEngine } from '../tools/lib/concept-system/engine.mjs'
 import { LearningQueue, LearningWorker, validateEvaluation } from '../tools/lib/concept-system/learning.mjs'
 import { createLearningHost, evaluateWithHost } from '../lib/learning-host.js'
 import { createSessionDelivery } from '../lib/session-delivery.js'
@@ -26,6 +27,15 @@ async function assemble(ctx,id='fish',signal) {
   return ctx.hooks.get('system-prompt/assemble')[0](base,{agent:{session:{id}},signal},()=>base)
 }
 function job(store,id) {return store.journal.use(db=>JSON.parse(db.prepare('SELECT payload FROM learning_jobs WHERE id=?').get(id).payload))}
+
+async function seed(store, r=result(), evidence=source) {
+  const engine=new ConceptEngine(store)
+  for(const [i,c] of r.candidates.entries()) {
+    const {quote,status,reason,collections,...proposal}=c
+    const m=await engine.call('concept_propose',{...proposal,key:'seed-'+i,source:evidence})
+    await engine.call('concept_review',{key:'seed-'+i,candidate_id:m.id,status,reason,collections})
+  }
+}
 
 test('sources persist before turn end, deduplicate, and only become eligible at end',async t=>{
   const store=new ObservationStore(box(t)),q=new LearningQueue(store)
@@ -98,7 +108,7 @@ test('evidence rules reject invented quotes, source swaps, ungrounded beliefs an
   assert.equal(validateEvaluation(imitation,source).candidates[0].subject,'fish')
 })
 
-test('host event -> durable queue -> turn end -> automatic evaluation -> every-step context, scoped by session',async t=>{
+test('host messages stay observational; foreground concepts still render on every step, scoped by session',async t=>{
   const store=new ObservationStore(box(t)),ctx=host(),observer=new Observer({store,paths:{}})
   let calls=0,cfg={conceptSystem:{observe:true,learning:true,mode:'active',renderBudget:400}}
   const learning=createLearningHost({ctx,observer,config:()=>cfg,sessionIds:['fish'],start:false,evaluate:async()=>{calls++;return result()}})
@@ -108,7 +118,7 @@ test('host event -> durable queue -> turn end -> automatic evaluation -> every-s
   send('fish',event(1,'user/message',{source:{kind:'user'},content:[{type:'text',text:source.excerpt}]}))
   send('fish',event(2,'request/header',{header:{config:route}}))
   await observation.stop();assert.equal(calls,0)
-  await learning.onEvent({id:'fish'},event(3,'turn/end',{}));await learning.worker.wake();assert.equal(calls,1)
+  await learning.onEvent({id:'fish'},event(3,'turn/end',{}));await learning.worker.wake();assert.equal(calls,0);await seed(store)
   const step=ctx.hooks.get('agent/pre-step')[0],agent={session:{id:'fish'}},base={id:'m1',role:'user',source:{kind:'user'},content:[{type:'text',text:'聊聊吧'}]},signal=new AbortController().signal
   const next=()=>({kind:'continue',messages:[base]})
   const context=await assemble(ctx,'fish',signal)
@@ -137,14 +147,14 @@ test('scheduler instructions, reasoning blocks and learned injections are never 
   await learning.stop()
 })
 
-test('external owner text is queued separately, deduplicated and not sent as extra host metadata',async t=>{
+test('external owner text is not queued or sent as extra host metadata',async t=>{
   const root=box(t),store=new ObservationStore(path.join(root,'evidence')),ctx=host(),observer=new Observer({store,paths:{}})
   const learning=createLearningHost({ctx,observer,config:()=>({conceptSystem:{observe:true}}),sessionIds:['fish'],start:false})
   const outgoing=[]
   const delivery=createSessionDelivery({controller:{create:async()=>({sessionId:'fish'}),prompt:async r=>outgoing.push(r)},dshHome:root,cwd:root,sessionId:'fish',config:()=>({}),persona:async()=>'',learning})
   const request={requestId:'receipt-1',sessionId:'fish',content:[{type:'text',text:'主人私信：包装提示'}]}
   await delivery.send(request,undefined,{learningSources:[source]});await delivery.send(request,undefined,{learningSources:[source]})
-  assert.equal(store.events({type:'learning.enqueued'}).length,1)
+  assert.equal(store.events({type:'learning.enqueued'}).length,0)
   assert.equal(outgoing[0].learningSources,undefined)
   await learning.stop()
 })
@@ -181,21 +191,20 @@ test('pending jobs follow the current route while completed-turn jobs retain the
   assert.equal(job(store,a.id).attempts,0)
 })
 
-test('actual fish speech enters learning separately, and newly learned fish material appears on the next step',async t=>{
+test('fish operation reports and genuine concepts are never re-extracted from replies',async t=>{
   const store=new ObservationStore(box(t)),ctx=host(),observer=new Observer({store,paths:{}})
-  const r=result();Object.assign(r.candidates[0],{subject:'fish',content:'慢慢来',quote:'慢慢来',tags:['phrase'],collections:[{name:'日常表达',definition:'日常表达相关概念',boundary:'不据此推断个人认同',aliases:[],related:[],reason:'来源属于这一主题'}]})
-  const learning=createLearningHost({ctx,observer,config:()=>({conceptSystem:{observe:true,learning:true,mode:'active',renderBudget:400}}),sessionIds:['fish'],start:false,evaluate:async()=>r})
-  const step=ctx.hooks.get('agent/pre-step')[0],args={agent:{session:{id:'fish'}}},next=()=>({kind:'continue',messages:[]})
-  assert.equal((await assemble(ctx)).contexts.length,0)
-  await learning.onEvent({id:'fish'},event(1,'request/header',{header:{config:route}}))
-  await learning.onEvent({id:'fish'},event(2,'assistant/message',{message:{source:{kind:'model'},content:[{type:'reasoning',text:'秘密推理'},{type:'text',text:'慢慢来，我们先试试看。'}]}}))
+  let calls=0
+  const learning=createLearningHost({ctx,observer,config:()=>({conceptSystem:{observe:true,learning:true,mode:'active',renderBudget:400}}),sessionIds:['fish'],evaluate:async()=>{calls++;return result()}})
+  t.after(()=>learning.stop())
+  const audit=attachSessionEvents(ctx,observer,'fish',{onEvent:learning.onEvent})
+  for(const [i,text] of ['给「问题区分」补元数据，已写入 Mem verified:true','范畴滑动：把词从原范畴滑到另一个范畴'].entries())
+    ctx.hooks.get('session/event')[0]({id:'fish'},event(i+1,'assistant/message',{message:{source:{kind:'model'},content:[{type:'text',text}]}}))
+  await audit.stop()
   await learning.onEvent({id:'fish'},event(3,'turn/end',{}));await learning.worker.wake()
-  const after=await assemble(ctx)
-  assert.equal(after.contexts.length,1);assert.match(after.contexts[0].text,/慢慢来/)
-  assert.doesNotMatch(after.contexts[0].text,/秘密推理/)
-  assert.equal((await step(args,next)).messages.length,0)
-  assert.equal(Object.values(store.state().concepts.sources)[0].actor,'fish')
-  await learning.stop()
+  assert.equal(calls,0)
+  assert.equal(store.events({type:'learning.enqueued'}).length,0)
+  assert.equal(store.events({type:'host.session_event'}).length,2)
+  assert.equal(store.state().concepts,undefined)
 })
 
 test('learning errors cannot block ordinary model calls, but cancellation propagates',async t=>{
@@ -223,7 +232,7 @@ test('stopping evaluation cancels a hanging host call; no tool execution or comp
 test('native runtime-context projection deduplicates snapshots and the learning hook cannot keep a completed turn alive',async t=>{
   const store=new ObservationStore(box(t)),ctx=host(),observer=new Observer({store,paths:{}})
   const learning=createLearningHost({ctx,observer,config:()=>({conceptSystem:{observe:true,learning:true,mode:'active',renderBudget:400}}),sessionIds:['fish'],start:false,evaluate:async()=>result()})
-  await learning.worker.queue.enqueue({session_id:'fish',source,route});await learning.worker.queue.ready('fish');await learning.worker.wake()
+  await seed(store)
   let retained
   // Contract from DSH agent-loop: project only a changed full snapshot; terminate
   // a completed turn when the next pre-step has no claimed/projected messages.
@@ -243,7 +252,7 @@ test('native runtime-context projection deduplicates snapshots and the learning 
   assert.equal((await nativeDecision([{id:'user-1'}])).messages.length,2)
   assert.equal((await nativeDecision([])).messages.length,0)
   assert.equal(store.events({type:'learning.context_admitted'}).length,1)
-  assert.equal(store.events({type:'learning.enqueued'}).length,1)
+  assert.equal(store.events({type:'learning.enqueued'}).length,0)
   await learning.stop()
 })
 
@@ -264,7 +273,7 @@ test('provider delivery receipts require a real admission and an acknowledgement
  const store=new ObservationStore(box(t)),ctx=host(),observer=new Observer({store,paths:{}})
  const learning=createLearningHost({ctx,observer,config:()=>({conceptSystem:{observe:true,learning:true,mode:'active',renderBudget:400}}),sessionIds:['fish'],start:false,evaluate:async()=>result()})
  t.after(()=>learning.stop())
- await learning.worker.queue.enqueue({session_id:'fish',source,route});await learning.worker.queue.ready('fish');await learning.worker.wake()
+ await seed(store)
  await learning.onEvent({id:'fish'},event(1,'session-log-deepseek/delivery-accepted',{sessionId:'fish',throughSeq:100}))
  assert.equal(store.events({type:'learning.context_delivered'}).length,0)
  const assembly=await assemble(ctx),sections=assembly.contexts.map(({name,text})=>({name,text}))
@@ -287,22 +296,23 @@ test('tool-call narration stays in the raw audit but never becomes a learned con
  assert.equal(store.events({type:'learning.enqueued'}).length,0)
  assert.equal(store.events({type:'learning.source_excluded'}).length,2)
  await learning.onEvent({id:'fish'},event(3,'assistant/message',{message:{source:{kind:'model'},content:[{type:'text',text:'字幕只展示了原型，长期维护成本仍需要独立证据。'}]}}))
- assert.equal(store.events({type:'learning.enqueued'}).length,1)
+ assert.equal(store.events({type:'learning.enqueued'}).length,0)
 })
 
-test('a foreground turn defers an in-flight learning evaluation and resumes its saved result while idle',async t=>{
+test('host reload leaves historical pending and validated jobs and all concept data untouched',async t=>{
  const store=new ObservationStore(box(t)),ctx=host(),observer=new Observer({store,paths:{}})
- let release,started,calls=0;const began=new Promise(r=>started=r),wait=new Promise(r=>release=r)
- const learning=createLearningHost({ctx,observer,config:()=>({conceptSystem:{observe:true,learning:true}}),sessionIds:['fish'],start:false,evaluate:async()=>{calls++;started();await wait;return result()}})
- t.after(()=>learning.stop())
- const item=await learning.worker.queue.enqueue({session_id:'fish',source,route});await learning.worker.queue.ready('fish')
- const evaluating=learning.worker.wake();await began
- await learning.onEvent({id:'fish'},event(1,'turn/start',{}));release();await evaluating
- assert.equal(job(store,item.id).status,'ready');assert.ok(job(store,item.id).evaluation)
- assert.equal(Object.keys(store.state().concepts?.members??{}).length,0)
- await learning.worker.wake();assert.equal(calls,1)
- await learning.onEvent({id:'fish'},event(2,'turn/end',{}));await learning.worker.wake()
- assert.equal(job(store,item.id).status,'done');assert.equal(calls,1)
- assert.equal(Object.keys(store.state().concepts.members).length,1)
- assert.equal(store.events({type:'learning.deferred_until_idle'}).length,1)
+ await seed(store)
+ const q=new LearningQueue(store)
+ await q.enqueue({session_id:'fish',source:{...source,id:'old-pending'},route})
+ const old=await q.enqueue({session_id:'fish',source:{...source,id:'old-validated'},route});await q.ready('fish')
+ const leased=await q.claim();await q.update(leased,{evaluation:result()},'learning.validated')
+ const before=JSON.stringify(store.state()),jobs=store.journal.use(db=>db.prepare('SELECT payload FROM learning_jobs ORDER BY id').all())
+ let calls=0
+ const learning=createLearningHost({ctx,observer,config:()=>({conceptSystem:{observe:true,learning:true,mode:'active',renderBudget:400}}),sessionIds:['fish'],evaluate:async()=>{calls++;return result()},revise:async()=>{calls++;throw Error('must not infer')}})
+ await learning.onEvent({id:'fish'},event(1,'request/header',{header:{config:{provider:'changed',model:'changed'}}}))
+ await learning.onEvent({id:'fish'},event(2,'turn/end',{}));await assemble(ctx);await learning.worker.wake();await learning.stop()
+ assert.equal(calls,0)
+ assert.equal(JSON.stringify(store.state()),before)
+ assert.deepEqual(store.journal.use(db=>db.prepare('SELECT payload FROM learning_jobs ORDER BY id').all()),jobs)
+ assert.ok(job(store,old.id))
 })
