@@ -52,6 +52,9 @@ try {
   const assembly=await sp.assemble({agent})
   const text=renderContextSnapshot(sp.refreshContext(assembly,{agent}))
   assert.match(text,/康德 \{\{literal\}\}/)
+  assert.equal(assembly.contexts.filter(c=>c.name==='bili-whale-concept-maintenance').length,1)
+  assert.match(text,/concept_catalog/)
+  assert.match(text,/仅有 memory_id 不能算整条阅读维护完成/)
   assert.equal(assembly.contexts.filter(c=>c.name==='bili-whale-learning-context').length,1)
   assert.equal(renderContextSnapshot(await sp.assemble({agent:{session:{id:'other'}}})), '')
   const empty={kind:'enter',messages:[]}
