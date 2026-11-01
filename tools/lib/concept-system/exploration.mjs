@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { matchesScene } from "./scenes.mjs";
 import { hash } from "./store.mjs";
 
 export const EXPLORATION_DEFAULTS = Object.freeze({
@@ -21,7 +22,7 @@ const evidence = (s, c, scene) =>
         .filter(
           (m) =>
             m?.status === "accepted" &&
-            (!scene || m.scene === "general" || m.scene === scene),
+            (!scene || matchesScene(m.scene,scene)),
         )
         .map((m) => sourceKey(s, m.source_id)),
     ),
@@ -233,7 +234,7 @@ export function validateExploration(s, input, now) {
         !m ||
         m.status !== "pending" ||
         m.subject !== input.subject ||
-        (m.scene !== "general" && m.scene !== input.scene) ||
+        (!matchesScene(m.scene,input.scene)) ||
         !s.sources[m.source_id]
       )
         throw Error(

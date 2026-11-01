@@ -1,4 +1,6 @@
 import crypto from "node:crypto";
+import { matchesScene } from "./scenes.mjs";
+import { enrichMember } from "./member-enrichment.mjs";
 import { ObservationStore, hash, stable, redact } from "./store.mjs";
 import { schemas } from "./schemas.mjs";
 import { Observer } from "./observation.mjs";
@@ -79,7 +81,7 @@ export function scoreDecision(state, input, now) {
         throw Error(
           "Contribution must reference an accepted collection member",
         );
-      if (m.scene !== "general" && m.scene !== input.scene)
+      if (!matchesScene(m.scene,input.scene))
         throw Error("Member scene does not match decision scene");
       if (c.subject !== input.subject)
         throw Error("Collection subject does not match decision subject");
@@ -294,6 +296,8 @@ export class ConceptEngine {
           if(!c)throw Error('Unknown collection');
           result=applyCatalogMetadata(state,c,input,{source_ids:input.source_ids,reason:input.reason,at:now});
           emit('collection.catalog_updated',{collection_id:c.id,metadata_evidence:c.metadata_evidence},links(input));
+        } else if (name === "concept_enrich") {
+          result=enrichMember(this.store,d,emit,input,now);
         } else if (name === "concept_propose") {
           const existing = own(state.sources, input.source.id);
           if (existing && stable(existing) !== stable(input.source))

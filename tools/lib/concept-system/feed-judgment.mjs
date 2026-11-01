@@ -475,7 +475,7 @@ export async function planSearch(selector, legacyKeywords) {
                 members: state.collections[target.collection_id].members
                   .map((id) => state.members[id])
                   .filter((m) => m.status === "accepted")
-                  .map((m) => ({ id: m.id, content: m.content, tags: m.tags })),
+                  .map((m) => ({ id: m.id, content: m.content, tags: m.tags, keywords:m.keywords??[] })),
                 question: target.question_id
                   ? state.exploration.questions[target.question_id]
                   : null,

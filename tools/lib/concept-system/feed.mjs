@@ -6,18 +6,20 @@ import {selectJudged,explorationForFeed,planSearch} from './feed-judgment.mjs'
 
 const scene='feed'
 const normalized=s=>String(s??'').normalize('NFKC').toLowerCase().trim()
-const useful=s=>([...String(s)].length>=2||/^\p{Script=Han}$/u.test(String(s))) && [...String(s)].length<=24
+const useful=s=>([...String(s)].length>=2||/^\p{Script=Han}$/u.test(String(s))) && [...String(s)].length<=40
 export function feedGroups(state) {
   if(!state)return []
   return Object.values(state.collections).filter(c=>!c.archived_at&&c.subject==='fish').map(c=>({
     collection:c,
     members:c.members.map(id=>state.members[id]).filter(m=>m?.status==='accepted'&&m.subject==='fish'&&
-      m.tags.includes('topic')&&['explicit','mention'].includes(m.interpretation)&&['general',scene].includes(m.scene)),
+      m.tags.includes('topic')&&['explicit','mention'].includes(m.interpretation)&&['general','watch',scene].includes(m.scene)),
   })).filter(g=>g.members.length).sort((a,b)=>a.collection.id.localeCompare(b.collection.id))
 }
-function termOf(m,c) {
+function termOf(m,c,seed) {
   const clean=s=>String(s).replace(/[\r\n\t]/g,' ').trim()
-  return [clean(m.content),clean(c.name)].find(useful)??null
+  const terms=(m?.keywords??[]).map(clean).filter(useful)
+  if(terms.length)return terms[seed?parseInt(hash([seed,m.id]).slice(0,8),16)%terms.length:0]
+  return [clean(m?.content??''),...(m?.triggers??[]).map(clean),clean(c.name)].find(useful)??null
 }
 function containsTerm(title,term) {
   const value=normalized(term)
@@ -41,12 +43,12 @@ export function interestPlan(state,seed,now,limit=4) {
   input.options=[...preliminary.rows].sort((a,b)=>b.score-a.score||a.label.localeCompare(b.label)).slice(0,20).map(r=>input.options.find(o=>o.label===r.label))
   const competition=scoreDecision(state,input,now)
   const ranked=[...competition.rows].sort((a,b)=>b.score-a.score||a.label.localeCompare(b.label))
-  const keywords=[],member_competitions=[]
+  const keywords=[],member_competitions=[],keyword_sources=[]
   for(const row of ranked) {
     const g=groups.find(g=>g.collection.id===row.label)
     const byTerm=new Map()
     for(const m of [...g.members].sort((a,b)=>(a.interpretation==='explicit'?0:1)-(b.interpretation==='explicit'?0:1)||a.id.localeCompare(b.id))) {
-      const term=termOf(m,g.collection)
+      const term=termOf(m,g.collection,seed)
       if(term&&!byTerm.has(normalized(term)))byTerm.set(normalized(term),m)
     }
     const memberInput={question:`兴趣集合「${g.collection.name}」用哪个话题检索？`,scene,subject:'fish',seed:seed+':member:'+g.collection.id.slice(-12),
@@ -55,11 +57,12 @@ export function interestPlan(state,seed,now,limit=4) {
     memberInput.options=[...members.rows].sort((a,b)=>b.score-a.score||a.label.localeCompare(b.label)).slice(0,20).map(r=>memberInput.options.find(o=>o.label===r.label))
     const memberCompetition=scoreDecision(state,memberInput,now)
     member_competitions.push(memberCompetition)
-    const m=g.members.find(m=>m.id===memberCompetition.winner),term=termOf(m,g.collection)
+    const m=g.members.find(m=>m.id===memberCompetition.winner),term=termOf(m,g.collection,seed)
+    keyword_sources.push({term,member_id:m.id,collection_id:g.collection.id})
     if(!keywords.some(k=>normalized(k)===normalized(term)))keywords.push(term)
     if(keywords.length>=limit)break
   }
-  return {keywords,competition,member_competitions}
+  return {keywords,competition,member_competitions,keyword_sources}
 }
 export function videoContributions(video,groups) {
   const title=normalized(video.t),quality=Math.max(0,Number(video._score)||0)
@@ -69,7 +72,7 @@ export function videoContributions(video,groups) {
   return groups.flatMap(g=>{
     const hits=g.members.flatMap(m=>{
       if(m.exclusions.some(x=>useful(x)&&containsTerm(title,x)))return []
-      const term=[termOf(m,g.collection),g.collection.name,...m.triggers].filter(x=>x&&useful(x)).find(x=>containsTerm(title,x))
+      const term=[...(m.keywords??[]),termOf(m,g.collection),g.collection.name,...m.triggers].filter(x=>x&&useful(x)).find(x=>containsTerm(title,x))
       return term?[{m,term}]:[]
     }).sort((a,b)=>(a.m.interpretation==='explicit'?0:1)-(b.m.interpretation==='explicit'?0:1)||a.m.id.localeCompare(b.m.id))
     return hits.length?[contribution(g,hits[0].m,relevance,`标题命中「${hits[0].term}」；来源成员 ${hits[0].m.id}`)]:[]

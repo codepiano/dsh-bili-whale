@@ -64,6 +64,7 @@ export const collectionPlacement = z.union([
   z.object({name:z.string().trim().min(1).max(100),...collectionMetadata,reason:z.string().trim().min(1).max(1000)}).strict(),
 ]);
 export const schemas = {
+  concept_enrich:z.object({key,...links,candidate_id:id,keywords:z.array(z.string().trim().min(1).max(40)).min(1).max(20),evidence:z.array(z.union([z.object({source_id:id,quote:z.string().trim().min(1).max(600)}).strict(),z.object({read_id:id,page:z.number().int().min(1).max(24),quote:z.string().trim().min(1).max(600)}).strict()])).min(1).max(20),reason:text}).strict(),
   video_knowledge_save:z.object({read_id:id,summary:z.string().trim().min(20).max(4000),thoughts:z.string().trim().max(3000).default(''),questions:z.array(z.string().trim().min(1).max(500)).max(8).default([]),quotes:z.array(z.object({source_id:id,quote:z.string().trim().min(1).max(600)}).strict()).min(1).max(6)}).strict(),
   video_knowledge_get:z.object({read_id:id}).strict(),
   persona_revision_retry:z.object({attempt_id:id,expected_hash:z.string().regex(/^[a-f0-9]{64}$/),reason:text}).strict(),
