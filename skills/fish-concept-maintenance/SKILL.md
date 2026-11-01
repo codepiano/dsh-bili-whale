@@ -21,7 +21,7 @@ description: 鱼在实际读完视频字幕或转写正文后，将内容总结�
 
 0. 先提炼代表性关键词：像论文关键词一样，从已读正文中识别能代表内容主题、值得继续探索的名词或名词短语。可以是历史事件、理论名称、人物、现象、效应、模式或抽象概念；不必先抽象成泛泛的大类。保留原名和必要的语境，附原文依据。数量按材料决定，不机械罗列所有名词、不凑数。作为兴趣/探索目标用 topic，不要只标 word 而让它退出兴趣竞争；收录为 mention 只表示接触到这个对象，不表示喜欢、认同或事实已经核实。
 1. 先查重：用 `concept_catalog` 查同主体的群及定义，再用 `concept_query` 按概念关键词、同义表达查看已有成员和来源；目录代表成员不是完整查重结果。
-2. 再维护：有实质新关键词/探索对象或概念才用 `concept_propose` / `concept_review`，优先复用已有 `collection_id`，附真实来源与原文依据；同一概念只复用已有成员 ID，不再 propose。对历史长句条目，用 concept_enrich 给已有 candidate_id 补充可检索的短 keywords 和真实 evidence；不能只把关键词埋在长解释里。evidence 可引用已有 source_id/quote，或完整已读 read_id/page/quote；keywords 必须在对应正文中出现。保留原 source_id 与历史，不重新造一条。群定义或边界确需补充时用 `concept_catalog_update`，不把维护汇报塞进成员。
+2. 再维护：有实质新关键词/探索对象或概念才用 `concept_propose` / `concept_review`，优先复用已有 `collection_id`，附真实来源与原文依据；同一概念只复用已有成员 ID，不再 propose。对历史长句条目，用 concept_enrich 给已有 candidate_id 补充可检索的短 keywords 和真实 evidence；不能只把关键词埋在长解释里。evidence 可引用已有 source_id/quote，或完整已读 read_id/page/quote；keywords 必须在对应正文或已完整读完材料的原始标题/简介中（仅用于名称交叉核对，不能把简介冒充已读正文）出现。字幕把专名识别错时，可用已读材料原始标题/简介交叉核对，不能把错字当新探索对象；必要时 replace_keywords=true 修正关键词，事件保留旧值，不改原文。保留原 source_id 与历史，不重新造一条。群定义或边界确需补充时用 `concept_catalog_update`，不把维护汇报塞进成员。
 3. 读回核对：写后通过查询确认成员状态、群归属和来源。只有重复、无值得提取的概念或证据不足时允许无新增，说明判断及实际复用的成员 ID（如有），不为完成步骤凑数。查询或写入失败时明确留下未完成项，不能报告概念群已处理。
 4. 独立保存知识：用 `video_knowledge_get` 查本版本，缺失时用 `video_knowledge_save` 保存总结、理解和疑问，并核对 `verified/memory_id`。Mem 暂不可用不能阻止已具备正文和来源的概念维护；仍按实际结果记录缺口。
 

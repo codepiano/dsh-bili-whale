@@ -8,7 +8,7 @@ import { redact } from "./lib/concept-system/store.mjs";
 const engine = new ConceptEngine(),
   server = new McpServer({ name: "bili-whale-concepts", version: "0.1.0" });
 const descriptions = {
-  concept_enrich:'为已有成员补充短关键词和可验证来源，不创建新成员、不改原始来源或曝光奖励。keywords须出现在所附来源正文中；证据用已有source_id+quote或完整已读read_id+page+quote。复用candidate_id，保持原始历史；补录和日常阅读后均可调用。',
+  concept_enrich:'为已有成员补充短关键词和可验证来源，不创建新成员、不改原始来源或曝光奖励。keywords须出现在所附来源正文或完整已读材料原始标题/简介中（元信息仅用于名称交叉核对，不冒充正文）；replace_keywords=true可修正旧关键词，保留历史事件。证据用已有source_id+quote或完整已读read_id+page+quote。复用candidate_id，保持原始历史；补录和日常阅读后均可调用。',
   video_knowledge_save:'把实际完整读完的视频内容总结、鱼自己的理解/想法和疑问保存到 Nowledge Mem 知识库。必须带真实 read_id 和来源逐字引文；按视频内容版本幂等写入并实际读回验证，返回 memory_id；不修改概念群、曝光、奖励或主人偏好。',
   video_knowledge_get:'按真实已读 read_id 从 Nowledge Mem 读回知识总结及 memory_id；不把本地概念群当知识正文。',
   persona_revision_retry:'用原始已完成来源重新排队一次已耗尽的反思，必须给出 attempt_id、当前 persona 哈希和理由。原失败记录保留，不接收伪造经历或指定修改内容，由正常后台重新判断。',

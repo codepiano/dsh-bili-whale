@@ -154,6 +154,7 @@ export class FeedConcepts {
     };
   }
   readBvids() {return this.enabled?new VideoReads(this.store).seen():[]}
+  interestSnapshot(state,now){return interestPlan(state,this.seed+':interests',now)}
   async plan(legacyKeywords) {
     if(!this.enabled)return {keywords:legacyKeywords,proposed:[],mode:'disabled'}
     legacyKeywords=redact(legacyKeywords)
@@ -167,7 +168,7 @@ export class FeedConcepts {
       const active=this.mode==='active'&&plan.keywords.length>0
       // Reserve two of at most six search slots for explicit/fallback preferences.
       const keywords=active?[...new Set([...plan.keywords,...legacyKeywords])].slice(0,6):legacyKeywords
-      const result={keywords,proposed:plan.keywords,mode:this.mode,preview_id:preview,member_preview_ids,exploration:this.mode==='active'?explorationForFeed(state,this.seed,now):null,run_id:this.runId,seed:this.seed}
+      const result={keywords,proposed:plan.keywords,keyword_sources:plan.keyword_sources??[],mode:this.mode,preview_id:preview,member_preview_ids,exploration:this.mode==='active'?explorationForFeed(state,this.seed,now):null,run_id:this.runId,seed:this.seed}
       emit('feed.search_planned',result,{trace_id:this.trace})
       return result
     })

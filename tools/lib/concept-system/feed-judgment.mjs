@@ -462,8 +462,10 @@ export async function planSearch(selector, legacyKeywords) {
         const state = d.state.concepts,
           route = explorationForFeed(state, selector.seed, store.now()),
           target = route.target;
+        const interests=selector.interestSnapshot?.(state,store.now())??null;
         const packet = {
           status: "search_plan_required",
+          interests,
           run_id: runId,
           seed: selector.seed,
           state_version: hash(state),
@@ -488,9 +490,10 @@ export async function planSearch(selector, legacyKeywords) {
             name: c.name,
           })),
           instructions:
-            "调用 feed_search_plan 提出1至4条短查询词与理由。deep 围绕该未解问题补前置知识、反例和争议；revisit 针对该稀疏群补解释或应用实例，若其是立场则提出可检验的问题，不把立场声明当作事实或直接话题；discover 主动查当前概念图之外的陌生术语或领域。随后原参数重跑 feed 执行真实搜索，再按 judgment_required 调用 feed_assess 并恢复清单。",
+            "调用 feed_search_plan 提出1至4条短查询词与理由。interests 给出本轮正常兴趣竞争的关键词及来源成员，可作为与目标相关的检索线索，不得为命中关键词牺牲探索相关度。deep 围绕该未解问题补前置知识、反例和争议；revisit 针对该稀疏群补解释或应用实例，若其是立场则提出可检验的问题，不把立场声明当作事实或直接话题；discover 主动查当前概念图之外的陌生术语或领域。随后原参数重跑 feed 执行真实搜索，再按 judgment_required 调用 feed_assess 并恢复清单。",
         };
         const object = store.object(packet);
+        if(interests)emit('feed.interests_planned',{run_id:runId,keywords:interests.keywords,keyword_sources:interests.keyword_sources??[],object:store.object(interests)},{trace_id:selector.trace,source:'feed'});
         d.state.feed_searches ??= {};
         d.state.feed_searches[runId] = {
           fingerprint: hash(input),
