@@ -31,6 +31,7 @@ async function add(
     interpretation = "explicit",
     collection = "哲学",
     tags = ["topic"],
+    legacy = false,
   } = {},
 ) {
   const member = await engine.call("concept_propose", {
@@ -45,7 +46,7 @@ async function add(
     content,
     tags,
     interpretation,
-  });
+  }, {allowLegacyTopic:legacy});
   const review = await engine.call("concept_review", {
     key: "review-" + key,
     candidate_id: member.id,
@@ -276,7 +277,7 @@ test("feedback requires evidence, neutral does not punish, repeat evidence canno
 });
 test("render respects budget, separate subjects, exposes exclusions and never overwrites persona", async (t) => {
   const { engine, store } = box(t);
-  await add(engine, { content: "一段足够长的兴趣描述".repeat(20) });
+  await add(engine, { content: "一段足够长的兴趣描述".repeat(20),legacy:true });
   await add(engine, {
     key: "b",
     content: "短句优先",

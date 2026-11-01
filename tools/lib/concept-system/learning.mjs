@@ -153,7 +153,7 @@ export class LearningWorker {
           job=await this.queue.update(job,{lease_until:this.store.now()+90000},'learning.applying')
           const {quote,status,reason,collections,...proposal}=c
           const key=`${job.id}:${i}`,links=job.trace_id?{trace_id:job.trace_id}:{}
-          const m=await this.engine.call('concept_propose',{...proposal,...links,key,source:job.source})
+          const m=await this.engine.call('concept_propose',{...proposal,...links,key,source:job.source},{allowLegacyTopic:true})
           await this.engine.call('concept_review',{...links,key,candidate_id:m.id,status,reason,collections:collections.map(p=>typeof p==='string'?{name:p}:p)})
         }
         await this.queue.update(job,{status:'done',lease_until:0},'learning.completed')

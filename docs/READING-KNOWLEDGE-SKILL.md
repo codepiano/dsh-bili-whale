@@ -25,3 +25,5 @@
 证据使用已有 source_id 的逐字引句，或已完整实际读完的 read_id/page/quote。关键词需出现在所附来源正文中；名称纠错可用已完整阅读材料的原始标题/简介交叉核对并保留 material_hash，不能把简介当正文。来源冲突、伪造引句、未读完材料拒绝写入。重复补证据不复制成员或同一证据。兴趣检索优先使用 keywords；多个关键词随确定性种子轮换，结果保存 keyword_sources 以追查成员/群 ID。旧数据可回退短 content/triggers，再回退群名。候选标题匹配使用全部关键词。
 
 正常 active 探索的搜索规划包也提供并归档兴趣竞争及 keyword_sources，而不是只在旧的兼容路径计算兴趣。检索词仍由鱼按探索目标判断，不强制选中某个关键词或候选。
+
+新 topic 主名称 content 为1–40字名词/名词短语，不接收带解释句式标点的整句；解释另存 description，关键词另存 keywords。历史长句通过 concept_enrich 的 label 原位修复，旧 content 自动保留在 description 和事件/版本中，成员 ID/source_id 不变。同主体、阅读场景中规范化同名 topic 再次 propose 会复用成员并保留新增来源，而不另建副本；同名异物需在名称中补真实语境。历史已验证队列只保留内部 legacy 回放兼容，后台自动提炼仍不启动。

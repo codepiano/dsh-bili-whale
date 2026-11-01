@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { validateTopicLabel,topicKey } from "./topic-labels.mjs";
 import { matchesScene } from "./scenes.mjs";
 import { enrichMember } from "./member-enrichment.mjs";
 import { ObservationStore, hash, stable, redact } from "./store.mjs";
@@ -232,9 +233,10 @@ export class ConceptEngine {
   constructor(store = new ObservationStore()) {
     this.store = store;
   }
-  async call(name, raw = {}, {signal} = {}) {
+  async call(name, raw = {}, {signal,allowLegacyTopic=false} = {}) {
     if (!schemas[name]) throw Error("Unknown concept tool");
     const input = redact(schemas[name].parse(raw));
+    if(name==='concept_propose'&&input.tags.includes('topic')&&!allowLegacyTopic)validateTopicLabel(input.content);
     if (name === "observation_capture")
       return new Observer({ store: this.store }).capture();
     if (name === "observation_response")
@@ -302,6 +304,11 @@ export class ConceptEngine {
           const existing = own(state.sources, input.source.id);
           if (existing && stable(existing) !== stable(input.source))
             throw Error("Source ID already has different evidence");
+          if(input.tags.includes('topic')&&!allowLegacyTopic){
+            const prior=Object.values(state.members).find(m=>m.subject===input.subject&&m.tags.includes('topic')&&topicKey(m.content)===topicKey(input.content)&&(m.scene===input.scene||['general','watch','feed'].includes(m.scene)&&['general','watch','feed'].includes(input.scene)));
+            if(prior){state.sources[input.source.id]??=input.source;prior.supporting_source_ids=[...new Set([...(prior.supporting_source_ids??[]),input.source.id])];emit('concept.reused',{candidate_id:prior.id,source_id:input.source.id,reason:'same canonical topic label'},links(input));emit('source.observed',{source:input.source},links(input));result=prior}
+          }
+          if(!result){
           const id =
             "item-" +
             hash([input.source.id, input.subject, input.content]).slice(0, 24);
@@ -312,12 +319,14 @@ export class ConceptEngine {
             ...fields,
             id,
             source_id: source.id,
+            ...(input.tags.includes('topic')&&!allowLegacyTopic?{keywords:input.keywords??[input.content]}:{}),
             status: "pending",
             proposed_at: now,
           };
           state.members[id] = result;
           emit("source.observed", { source: input.source }, links(input));
           emit("candidate.proposed", result, links(input));
+          }
         } else if (name === "concept_review") {
           const m = own(state.members, input.candidate_id);
           if (!m) throw Error("Unknown candidate");
