@@ -180,7 +180,7 @@ export const schemas = {
       ...links,
       source,
       subject: z.enum(["user", "fish"]),
-      content: text,
+      content: text.describe("代表性关键词/名词短语或独立概念；人物、事件、理论、现象、效应、模式均可直接作为探索对象，不要求纯抽象。"),
       tags: z
         .array(
           z.enum([

@@ -35,7 +35,7 @@ const descriptions = {
   exploration_progress:
     "选择后记录实际阅读/观看证据、回答、剩余问题及下一步；只有 engaged/completed 计曝光，不自动奖励。",
   concept_propose:
-    "记录携带来源的待评估概念。明确 subject=user 或 fish，提及不等于喜欢。",
+    "记录携带来源的待评估概念/代表性关键词。像论文关键词一样提炼名词或名词短语；历史事件、理论、人物、现象、效应、模式等具体对象可直接作为 topic 参与兴趣与探索，不必抽象成大类。明确主体，mention 不等于认同或事实核验。",
   concept_review: "先用concept_catalog查目录；复用群使用collection_id并记录reason，新群使用name与定义/边界。评估候选并关联集合，保留成员和原始证据；不直接改变人设。",
   concept_query: "按主体、场景、用途、状态检索成员和集合。",
   decision_preview:
