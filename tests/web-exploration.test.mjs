@@ -264,5 +264,7 @@ test('challenge pages are not readings; caller-reported unusable bodies skip wit
   await g.native('web_fetch',{url},{url,body:{content}},{url,statusCode:200,truncated:false});await g.acknowledge();
   const out=await g.next();assert.equal(out.status,'progress_required');assert.match(out.instructions,/outcome:failed/);
   await g.engine.call('exploration_progress',{key:'failed-body',decision_id:out.decision_id,outcome:'failed',source_ids:out.source_ids,reason:'Only a login page was delivered, not the selected article'});
+  assert.equal(pendingVideoKnowledge(g.store,'fish').length,0);
+  await assert.rejects(new VideoKnowledge(g.store).save({read_id:out.read_id}),/Knowledge requires/);
   await g.next();assert.equal(g.store.state().auto_exploration_cycles['night-web'].completed_reads?.length??0,0);
 });

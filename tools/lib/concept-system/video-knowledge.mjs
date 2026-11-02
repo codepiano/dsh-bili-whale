@@ -5,7 +5,7 @@ import { hash, redact } from './store.mjs'
 export function pendingVideoKnowledge(store,session_id) {
   const videos=store.journal.use(db=>db.prepare("SELECT payload FROM video_reads WHERE json_extract(payload,'$.session_id')=? AND json_extract(payload,'$.reading_complete')=1 ORDER BY rowid DESC").all(session_id).map(r=>JSON.parse(r.payload)))
   const pages=Object.values(store.state().resource_reads??{}).filter(r=>r.session_id===session_id&&r.reading_complete)
-  return [...pages,...videos].filter(r=>!r.coverage?.truncated&&['subtitles','audio_transcript','web_page'].includes(r.kind)&&r.knowledge?.status!=='saved').slice(0,5).map(r=>({read_id:r.id,...(r.kind==='web_page'?{url:r.url,save_tool:'resource_knowledge_save'}:{bvid:r.bvid,save_tool:'video_knowledge_save'}),title:store.getObject(r.material.hash).content.title,source_ids:r.sources.map(s=>s.id),...(r.knowledge?.draft?{retry_draft:store.getObject(r.knowledge.draft.hash).content}:{})}))
+  return [...pages,...videos].filter(r=>!['failed','skipped'].includes(store.state().concepts?.decisions?.[r.feed?.decision_id]?.exploration?.progress?.outcome)&&!r.coverage?.truncated&&['subtitles','audio_transcript','web_page'].includes(r.kind)&&r.knowledge?.status!=='saved').slice(0,5).map(r=>({read_id:r.id,...(r.kind==='web_page'?{url:r.url,save_tool:'resource_knowledge_save'}:{bvid:r.bvid,save_tool:'video_knowledge_save'}),title:store.getObject(r.material.hash).content.title,source_ids:r.sources.map(s=>s.id),...(r.knowledge?.draft?{retry_draft:store.getObject(r.knowledge.draft.hash).content}:{})}))
 }
 async function runNmem(args,content,signal) {
   const cli=process.env.NMEM_CLI_PATH||(fs.existsSync('/usr/local/bin/nmem')?'/usr/local/bin/nmem':'nmem')
@@ -20,7 +20,7 @@ async function runNmem(args,content,signal) {
 const writes=new Map()
 export class VideoKnowledge {
   constructor(store,{run=runNmem}={}){this.store=store;this.run=run}
-  read(id){const read=this.store.state().resource_reads?.[id]??this.store.journal.use(db=>{const row=db.prepare('SELECT payload FROM video_reads WHERE id=?').get(id);return row?JSON.parse(row.payload):null});if(!read||!read.reading_complete||read.coverage?.truncated||!['subtitles','audio_transcript','web_page'].includes(read.kind))throw Error('Knowledge requires complete, delivered source text');return read}
+  read(id){const read=this.store.state().resource_reads?.[id]??this.store.journal.use(db=>{const row=db.prepare('SELECT payload FROM video_reads WHERE id=?').get(id);return row?JSON.parse(row.payload):null});if(!read||['failed','skipped'].includes(this.store.state().concepts?.decisions?.[read.feed?.decision_id]?.exploration?.progress?.outcome)||!read.reading_complete||read.coverage?.truncated||!['subtitles','audio_transcript','web_page'].includes(read.kind))throw Error('Knowledge requires complete, delivered source text');return read}
   memoryId(read){return read.kind==='web_page'?'fish-web-'+hash([read.url,read.content_hash]).slice(0,32):'fish-video-'+hash([read.bvid,read.cid,read.kind,read.content_hash]).slice(0,32)}
   identity(read){return read.kind==='web_page'?`URL=${read.url} material=web_page version=${read.content_hash}`:`BV=${read.bvid} CID=${read.cid} material=${read.kind} version=${read.content_hash}`}
   stored(d,id){return d.state?.resource_reads?.[id]??d.reads.get(id)}
