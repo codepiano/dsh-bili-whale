@@ -42,10 +42,11 @@ export class VideoReads {
   constructor(store=new ObservationStore()){this.store=store}
   start(bvid,options={}) {
     if(!/^BV[0-9A-Za-z]{10}$/.test(bvid))throw Error('Invalid video ID')
-    return this.store.transaction({state:false},(d,emit)=>{
+    return this.store.transaction({},(d,emit)=>{
       let feed=null
       if(options.feed_run_id) {
-        const selection=d.receipt('feed-select:'+options.feed_run_id)
+        const resource=d.state.web_runs?.[options.feed_run_id]
+        const selection=d.receipt('feed-select:'+options.feed_run_id)??(resource?.selected?.length?{mode:'active',trace_id:'resource-'+hash(options.feed_run_id).slice(0,32),selected:resource.selected.filter(s=>s.kind==='video').map(s=>({bv:s.bvid})),decisions:resource.selected.filter(s=>s.kind==='video').map(s=>({id:s.decision_id,selected:s.bvid}))}:null)
         if(!selection||!selection.selected.some(v=>v.bv===bvid))throw Error('Video is not in the specified feed reading slate')
         feed={run_id:options.feed_run_id,trace_id:selection.trace_id,decision_id:selection.mode==='active'?(selection.decisions.find(x=>x.selected===bvid)?.id??null):null}
       }

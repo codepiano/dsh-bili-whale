@@ -8,8 +8,8 @@ import { redact } from "./lib/concept-system/store.mjs";
 const engine = new ConceptEngine(),
   server = new McpServer({ name: "bili-whale-concepts", version: "0.1.0" });
 const descriptions = {
-  resource_unavailable:'仅在宿主原生web_search/web_fetch未注册或无法执行时报告原因，标为调用者报告而非提供方实际故障。不产生阅读或曝光，继续正常预算。',
-  resource_assess:'评估宿主原生web_search实际返回的当前网页候选；按URL匹配完整立场，原文引述标题/摘要，相关度低于0.5不选。仅记录选题判断，不接受调用者提交网页正文或冒充已读。',
+  resource_unavailable:'仅在鱼专用fish_web_search及宿主web_fetch未注册或无法执行时报告原因，标为调用者报告而非提供方实际故障。不产生阅读或曝光，继续正常预算。',
+  resource_assess:'评估联合搜索实际返回的当前视频或网页候选；按URL匹配完整立场，原文引述标题/摘要，相关度低于0.5不选。仅记录选题判断，不接受调用者提交网页正文或冒充已读。',
   resource_read_page:'按实际read_id重读已交付网页的一页正文。来源含URL、版本和页数；不代表整个站点或仓库。',
   resource_knowledge_save:'将完整交付的网页、仓库页面或文章的总结和想法保存到Mem并读回验证；使用真实read_id与原文引文，不接受搜索摘要作为已读正文。',
   resource_knowledge_get:'按真实网页read_id读回Mem知识和来源版本。',
@@ -21,7 +21,7 @@ const descriptions = {
   persona_revision_rollback:'将指定修订恢复到修改前；必须携带当前文件 expected_hash 和理由。保留新回滚版本与原历史，拒绝覆盖未知外部修改。',
   concept_catalog:'概念群目录索引。可按主体、关键词分页检索；包含定义、归属边界、别名、代表成员及原始来源。先查目录，用群ID归类，缺少定义会显式标记。',
   concept_catalog_update:'补充概念群的定义、边界、别名和关联群。必须引用本群已有来源并说明理由；不合并、移动或删除成员。',
-  feed_details:'按 run_id 读取已归档规划明细，不重跑竞争、不产生曝光。按 section 分页查看兴趣评分、群内评分、问题、回访群、目标成员、立场或候选；stage=web 可查网页 candidates/assessments/decisions/reads。member_competitions 用 competition_index 选择一场竞争，再用 offset/limit 翻页。日常先执行 exploration_next 默认关键数据，需要更多依据才调用。',
+  feed_details:'按 run_id 读取已归档规划明细，不重跑竞争、不产生曝光。按 section 分页查看兴趣评分、群内评分、问题、回访群、目标成员、立场或候选；stage=web 可查联合 search_results/candidates/assessments/decisions/reads。member_competitions 用 competition_index 选择一场竞争，再用 offset/limit 翻页。日常先执行 exploration_next 默认关键数据，需要更多依据才调用。',
   exploration_next:'日常自动探索状态机。依次返回搜索规划、候选判断、实际选片、字幕优先、缺字幕云端音频转写、完整正文逐页阅读、问题进展，按实际阅读预算继续清单与后续检索，最多三轮；第一条读完不结束，达到night.maxVideos或三轮结束才complete/exhausted。默认只返回当前步骤的关键数据，详情用返回的 feed_details 指针按需读取。始终沿用 cycle_id，不手工伪造阅读状态。',
   video_audio_status:'查询 read_id 已关联的云端语音任务；pending 时至少30秒后再查或下次作息继续，不重交。不把任务受理当已读，完成后仍须 video_read_page 实际交付正文。',
   video_read_frames:'仅在画面信息确有必要时补充指定 read_id 的 1–6 个时间点截图并直接返回图片；需写 reason。记录 BV/CID、时间、图片哈希和原阅读关联，生成图片不等于已看懂全片。',
@@ -29,7 +29,7 @@ const descriptions = {
   feed_run: "执行真实只读平台检索与选片流程，固定参数由插件服务运行，不需要会话终端写入学习目录。按 search_plan_required / judgment_required 完成规划和判断后，重复相同参数恢复同一 run-id。不会评论、收藏或发送。",
   debrief_read: "字幕优先读取已选视频并返回物料回执；缺字幕时调用 common-mcp speech HTTP 服务云端转写，不使用本地模型。audio=always 用于核实口述，never 禁用转写；context=true 才补封面/弹幕/热评。画面另用 video_read_frames；无任意命令或路径参数。",
   feed_search_plan:
-    "为 feed 的 search_plan_required 阶段提出符合探索路径的查询词与理由，并选择source=bilibili或web；文章、文档、论文、仓库README/issue/commit用web，状态机随后要求宿主原生web_search/web_fetch；不修改概念标签。随后恢复原 run-id 真实检索。",
+    "为 feed 的 search_plan_required 阶段提出符合探索路径的查询词与理由，并选择source=both（默认双来源）、bilibili或web；文章、文档、论文、仓库README/issue/commit用web，状态机随后要求鱼专用fish_web_search及宿主web_fetch；不修改概念标签。随后恢复原 run-id 真实检索。",
   feed_assess:
     "评估 feed 当前返回的候选；自动 cycle 每次一个候选，完整覆盖全部立场，逐字引用候选原文。探索相关度低于0.5不入选，同名词误命中给0。立场strength表示对选择阅读的支持：读为正、跳过为负、无关为0。清单允许不足或为空。只记录判断，不伪造观看；使用回执的exploration_next续接。",
   exploration_configure:

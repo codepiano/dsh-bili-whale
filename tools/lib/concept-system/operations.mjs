@@ -7,11 +7,11 @@ const feed=fileURLToPath(new URL('../../commands/feed.mjs',import.meta.url))
 const debrief=fileURLToPath(new URL('../../commands/debrief.mjs',import.meta.url))
 // Fixed business operations in the already configured local MCP service. No
 // arbitrary executable, file path, environment or platform write is accepted.
-export async function runFeed(input,{signal}={}) {
+export async function runFeed(input,{signal,node=process.execPath,env=process.env}={}) {
   signal?.throwIfAborted()
   const args=[feed,'--json','--run-id',input.run_id,'--seed',input.seed??input.run_id,
     '--n',String(input.n),'--per',String(input.per),'--pool',String(input.pool),'--source',input.source]
-  const {stdout}=await run(process.execPath,args,{signal,timeout:120000,maxBuffer:1024*1024,env:{...process.env,DSH_NODE:process.execPath}})
+  const {stdout}=await run(node,args,{signal,timeout:120000,maxBuffer:1024*1024,env:{...env,DSH_NODE:node}})
   return JSON.parse(stdout)
 }
 export async function readDebrief(input,{signal}={}) {

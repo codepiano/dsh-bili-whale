@@ -16,8 +16,8 @@ export function compactFeed(packet) {
   if (!['search_plan_required', 'judgment_required'].includes(packet?.status)) return packet;
   const result = pick(packet, ['status', 'run_id', 'seed', 'mode', 'n', 'per', 'state_version', 'selected', 'stances', 'candidates', 'target_member', 'selection_policy', 'instructions', 'assessment_progress']);
   if(packet.status==='search_plan_required') {
-    result.source_options=['bilibili','web'];
-    if(!result.instructions?.includes('source=bilibili'))result.instructions=(result.instructions??'')+'\n按问题选择 source=bilibili 或 web；文章、文档、论文页面和仓库README/issue/commit可选web，后续由状态机调用宿主原生web_search/web_fetch。';
+    result.source_options=['both','bilibili','web'];
+    if(!result.instructions?.includes('source=both'))result.instructions=(result.instructions??'')+'\n按问题选择 source=both（双来源）、bilibili 或 web；文章、文档、论文页面和仓库README/issue/commit可选web，后续由状态机调用鱼专用fish_web_search及宿主web_fetch。';
   }
   const route = packet.exploration;
   result.exploration = pick(route, routeKeys);
@@ -44,6 +44,7 @@ export function feedDetails(store, {run_id, stage='search', section, offset=0, l
   if(stage==='web'&&!web)throw Error('No archived web packet for this run_id');
   if (!run) throw Error('No archived '+stage+' packet for this run_id');
   const packet = store.getObject(run.packet).content;
+  const webReads=web?[...web.read_ids.map(id=>state.resource_reads[id]),...store.journal.use(db=>db.prepare("SELECT payload FROM video_reads WHERE json_extract(payload,'$.feed.run_id')=? ORDER BY rowid").all(run_id).map(r=>JSON.parse(r.payload)))]:[];
   let items, metadata = {};
   if (section === 'interest_competition' || section === 'member_competitions') {
     const competitions = section === 'interest_competition' ? [packet.interests?.competition].filter(Boolean) : packet.interests?.member_competitions ?? [];
@@ -52,7 +53,7 @@ export function feedDetails(store, {run_id, stage='search', section, offset=0, l
     metadata = {...pick(competition, ['algorithm', 'parameters', 'at', 'winner', 'state_version']), competition_count:competitions.length, competition_index};
     items = competition?.rows ?? [];
   } else {
-    items = {questions:packet.exploration?.questions, revisit:packet.exploration?.revisit, target_members:packet.target?.members, stances:packet.stances, candidates:web?.candidates??packet.candidates, assessments:web?Object.values(web.assessments):undefined, decisions:web?.selected.map(s=>state.concepts.decisions[s.decision_id]), reads:web?.read_ids.map(id=>pick(state.resource_reads[id],['id','url','requested_url','kind','status','reading_complete','content_hash','coverage']))}[section] ?? [];
+    items = {questions:packet.exploration?.questions, revisit:packet.exploration?.revisit, target_members:packet.target?.members, stances:packet.stances, candidates:web?.candidates??packet.candidates, search_results:web?.all_candidates, assessments:web?Object.values(web.assessments):undefined, decisions:web?.selected.map(s=>state.concepts.decisions[s.decision_id]), reads:web?webReads.map(r=>pick(r,['id','url','bvid','requested_url','kind','status','reading_complete','content_hash','coverage'])):undefined}[section] ?? [];
   }
   const next = offset + limit < items.length ? offset + limit : null;
   return {run_id, stage, section, packet_hash:run.packet, ...metadata, total:items.length, offset, items:items.slice(offset, offset+limit), next_offset:next, ...(next !== null ? {continue_with:{tool:'feed_details',arguments:{run_id,stage,section,offset:next,limit,competition_index}}} : {})};

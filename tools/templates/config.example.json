@@ -65,6 +65,7 @@
     "liveScope": "owner"
   },
   "night": {
+    "searchSource": "both",
     "windows": [
       {
         "start": "20:00",
