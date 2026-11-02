@@ -19,7 +19,7 @@ const source = z
     excerpt: text,
     ref: z.string().max(2000).optional(),
     occurred_at: z.string().datetime().optional(),
-    web: z.object({url:z.string().url(),title:z.string().max(1000),part:z.number().int().min(1).max(24),parts:z.number().int().min(1).max(24),content_hash:z.string().regex(/^[a-f0-9]{64}$/)}).strict().optional(),
+    web: z.object({url:z.string().url(),title:z.string().max(1000),part:z.number().int().min(1).max(256),parts:z.number().int().min(1).max(256),content_hash:z.string().regex(/^[a-f0-9]{64}$/)}).strict().optional(),
     video: z
       .object({
         bvid: z.string().regex(/^BV[0-9A-Za-z]{10}$/),
@@ -354,8 +354,10 @@ export const schemas = {
 
 // Resource APIs share the same relevance and signed stance constraints as videos.
 schemas.resource_assess=schemas.feed_assess.shape.assessments.element.omit({bvid:true}).extend({key,run_id:id,url:z.string().url().max(2000)}).strict();
-schemas.resource_read_page=z.object({read_id:id,page:z.number().int().min(1).max(24)}).strict();
+schemas.resource_read_page=z.object({read_id:id,page:z.number().int().min(1).max(256)}).strict();
 schemas.resource_knowledge_save=schemas.video_knowledge_save;
 schemas.resource_knowledge_get=schemas.video_knowledge_get;
 
 schemas.resource_unavailable=z.object({run_id:id,reason:text}).strict();
+
+schemas.resource_retry=z.object({key,run_id:id,url:z.string().url().max(8192)}).strict();

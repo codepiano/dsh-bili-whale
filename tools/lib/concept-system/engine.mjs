@@ -253,7 +253,7 @@ export class ConceptEngine {
     if(name==='video_read_frames')return (await import('../video-frames.mjs')).readVideoFrames(this.store,input,{signal});
     if(name==='video_knowledge_save'||name==='video_knowledge_get'){const {VideoKnowledge}=await import('./video-knowledge.mjs');const k=new VideoKnowledge(this.store);return name==='video_knowledge_save'?k.save(input,{signal}):k.get(input,{signal})}
     if(name==='video_read_page')return new (await import('./video-reads.mjs')).VideoReads(this.store).page(input);
-    if(name==='resource_assess'||name==='resource_read_page'||name==='resource_unavailable'){const w=new (await import('./web-exploration.mjs')).WebExploration(this.store);return name==='resource_assess'?w.assess(input):name==='resource_unavailable'?w.unavailable(input):w.page(input)}
+    if(name==='resource_assess'||name==='resource_read_page'||name==='resource_unavailable'||name==='resource_retry'){const w=new (await import('./web-exploration.mjs')).WebExploration(this.store);return name==='resource_retry'?w.retry(input):name==='resource_assess'?w.assess(input):name==='resource_unavailable'?w.unavailable(input):w.page(input)}
     if(name==='resource_knowledge_save'||name==='resource_knowledge_get'){const k=new (await import('./video-knowledge.mjs')).VideoKnowledge(this.store);return name==='resource_knowledge_save'?k.save(input,{signal}):k.get(input,{signal})}
     if(name==='feed_details')return (await import('./feed-presentation.mjs')).feedDetails(this.store,input);
     if(name==='exploration_next')return (await import('./auto-exploration.mjs')).nextExploration(this.store,input,{signal});

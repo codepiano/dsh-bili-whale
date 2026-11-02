@@ -17,7 +17,7 @@ export function compactFeed(packet) {
   const result = pick(packet, ['status', 'run_id', 'seed', 'mode', 'n', 'per', 'state_version', 'selected', 'stances', 'candidates', 'target_member', 'selection_policy', 'instructions', 'assessment_progress']);
   if(packet.status==='search_plan_required') {
     result.source_options=['both','bilibili','web'];
-    if(!result.instructions?.includes('source=both'))result.instructions=(result.instructions??'')+'\n按问题选择 source=both（双来源）、bilibili 或 web；文章、文档、论文页面和仓库README/issue/commit可选web，后续由状态机调用鱼专用fish_web_search及宿主web_fetch。';
+    if(!result.instructions?.includes('source=both'))result.instructions=(result.instructions??'')+'\n按问题选择 source=both（双来源）、bilibili 或 web；文章、文档、论文页面和仓库README/issue/commit可选web，后续由状态机调用鱼专用fish_web_search及fish_web_fetch（固定DS Fetch）。';
   }
   const route = packet.exploration;
   result.exploration = pick(route, routeKeys);
@@ -53,7 +53,7 @@ export function feedDetails(store, {run_id, stage='search', section, offset=0, l
     metadata = {...pick(competition, ['algorithm', 'parameters', 'at', 'winner', 'state_version']), competition_count:competitions.length, competition_index};
     items = competition?.rows ?? [];
   } else {
-    items = {questions:packet.exploration?.questions, revisit:packet.exploration?.revisit, target_members:packet.target?.members, stances:packet.stances, candidates:web?.candidates??packet.candidates, search_results:web?.all_candidates, assessments:web?Object.values(web.assessments):undefined, decisions:web?.selected.map(s=>state.concepts.decisions[s.decision_id]), reads:web?webReads.map(r=>pick(r,['id','url','bvid','requested_url','kind','status','reading_complete','content_hash','coverage'])):undefined}[section] ?? [];
+    items = {questions:packet.exploration?.questions, revisit:packet.exploration?.revisit, target_members:packet.target?.members, stances:packet.stances, candidates:web?.candidates??packet.candidates, search_results:web?.all_candidates, assessments:web?Object.values(web.assessments):undefined, decisions:web?.selected.map(s=>state.concepts.decisions[s.decision_id]), reads:web?webReads.map(r=>pick(r,['id','url','bvid','requested_url','kind','status','reading_complete','content_hash','coverage','fetch_receipt','error','error_code'])):undefined}[section] ?? [];
   }
   const next = offset + limit < items.length ? offset + limit : null;
   return {run_id, stage, section, packet_hash:run.packet, ...metadata, total:items.length, offset, items:items.slice(offset, offset+limit), next_offset:next, ...(next !== null ? {continue_with:{tool:'feed_details',arguments:{run_id,stage,section,offset:next,limit,competition_index}}} : {})};
