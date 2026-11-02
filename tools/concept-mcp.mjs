@@ -16,7 +16,8 @@ const descriptions = {
   persona_revision_rollback:'将指定修订恢复到修改前；必须携带当前文件 expected_hash 和理由。保留新回滚版本与原历史，拒绝覆盖未知外部修改。',
   concept_catalog:'概念群目录索引。可按主体、关键词分页检索；包含定义、归属边界、别名、代表成员及原始来源。先查目录，用群ID归类，缺少定义会显式标记。',
   concept_catalog_update:'补充概念群的定义、边界、别名和关联群。必须引用本群已有来源并说明理由；不合并、移动或删除成员。',
-  exploration_next:'日常自动探索状态机。依次返回搜索规划、候选判断、实际选片、字幕优先、缺字幕云端音频转写、完整正文逐页阅读、问题进展，最后 complete/exhausted。始终沿用 cycle_id，不手工伪造阅读状态。',
+  feed_details:'按 run_id 读取已归档规划明细，不重跑竞争、不产生曝光。按 section 分页查看兴趣评分、群内评分、问题、回访群、目标成员、立场或候选。member_competitions 用 competition_index 选择一场竞争，再用 offset/limit 翻页。日常先执行 exploration_next 默认关键数据，需要更多依据才调用。',
+  exploration_next:'日常自动探索状态机。依次返回搜索规划、候选判断、实际选片、字幕优先、缺字幕云端音频转写、完整正文逐页阅读、问题进展，最后 complete/exhausted。默认只返回当前步骤的关键数据，详情用返回的 feed_details 指针按需读取。始终沿用 cycle_id，不手工伪造阅读状态。',
   video_audio_status:'查询 read_id 已关联的云端语音任务；pending 时至少30秒后再查或下次作息继续，不重交。不把任务受理当已读，完成后仍须 video_read_page 实际交付正文。',
   video_read_frames:'仅在画面信息确有必要时补充指定 read_id 的 1–6 个时间点截图并直接返回图片；需写 reason。记录 BV/CID、时间、图片哈希和原阅读关联，生成图片不等于已看懂全片。',
   video_read_page:'读取指定真实 read_id 的一页完整字幕或云端音频转写正文（非简介），按 total_pages 逐页调用；仅原生工具结果实际含完整正文时记录该页，全部读完才计曝光。',
@@ -57,6 +58,7 @@ const descriptions = {
     "显式归档已返回的 DS 正文和可用推理；必须指向已准备提示，不伪造推理。",
 };
 const readonly = new Set([
+  "feed_details",
   "video_knowledge_get",
   'persona_revision_history',
   'concept_catalog',

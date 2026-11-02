@@ -648,7 +648,7 @@ test('automatic continuation retains the relevance and signed selection rubric i
   await engine.call('feed_search_plan',{...out.required_arguments,queries:['测量误差'],reason:'补充方法'});
   out=await next();
   assert.equal(out.next_action,'feed_assess');
-  assert.match(out.instructions,/克制所以跳过/);
+  assert.match(out.packet.instructions,/克制所以跳过/);
   assert.match(out.packet.instructions,/清单可短于n或为空/);
   assert.match(out.packet.instructions,/0.5/);
   const a=assessments(out.packet);

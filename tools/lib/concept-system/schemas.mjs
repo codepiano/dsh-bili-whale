@@ -72,6 +72,7 @@ export const schemas = {
   persona_revision_rollback:z.object({revision_id:id,expected_hash:z.string().regex(/^[a-f0-9]{64}$/),reason:text}).strict(),
   concept_catalog:z.object({subject:subject.optional(),query:z.string().max(300).default(''),page:z.number().int().min(1).max(100000).default(1),limit:z.number().int().min(1).max(100).default(20)}).strict(),
   concept_catalog_update:z.object({key,...links,collection_id:id,...collectionMetadata,source_ids:z.array(id).min(1).max(20),reason:text}).strict(),
+  feed_details:z.object({run_id:id,stage:z.enum(['search','judgment']).default('search'),section:z.enum(['interest_competition','member_competitions','questions','revisit','target_members','stances','candidates']),offset:z.number().int().min(0).max(100000).default(0),limit:z.number().int().min(1).max(10).default(5),competition_index:z.number().int().min(0).max(100).default(0)}).strict(),
   exploration_next:z.object({cycle_id:id.refine(v=>v.length<=80,'Cycle id too long')}).strict(),
   video_audio_status:z.object({read_id:id}).strict(),
   video_read_frames:z.object({read_id:id,times:z.array(z.number().finite().min(0)).min(1).max(6),reason:text}).strict(),

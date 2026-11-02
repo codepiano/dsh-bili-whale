@@ -1,3 +1,4 @@
+import {compactFeed} from './feed-presentation.mjs'
 import {config} from '../config.mjs'
 import {hash} from './store.mjs'
 import {VideoReads,isVideoTextKind} from './video-reads.mjs'
@@ -38,15 +39,15 @@ export async function nextExploration(store,{cycle_id},{signal,feed=runFeed,read
   const envelope={cycle_id,run_id,round:cycle.round,max_rounds:cycle.max_rounds,feed_arguments:args,continue_with:{tool:'exploration_next',arguments:{cycle_id}}}
   if(slate.status==='search_plan_required'||slate.status==='judgment_required') {
     const next_action=slate.status==='search_plan_required'?'feed_search_plan':'feed_assess'
-    let packet=slate,required_arguments={run_id,key:run_id+':search'};
+    let packet=compactFeed(slate),required_arguments={run_id,key:run_id+':search'};
     if(next_action==='feed_assess') {
       const assessed=store.state().feed_judgments?.[run_id]?.candidate_assessments??{},candidate=slate.candidates.find(v=>!assessed[v.bv]);
-      packet={...slate,candidates:candidate?[candidate]:[],assessment_progress:{assessed:Object.keys(assessed).length,total:slate.candidates.length}};
+      packet={...packet,candidates:candidate?[candidate]:[],assessment_progress:{assessed:Object.keys(assessed).length,total:slate.candidates.length}};
       required_arguments={run_id,key:run_id+':'+(candidate?.bv??'empty')};
     }
     const instructions=`只调用 ${next_action}，使用 required_arguments；候选判断每次只提交当前这一个候选，逐项覆盖 packet.stances 全部成员（无关也填0，引文可逐字使用候选标题）。非 discover 不填写 discovered_term。完成后调用 exploration_next({cycle_id:"${cycle_id}"})。不要直接调用 feed_run、猜测参数或排查源码；该 cycle 的全部检索参数由状态机保管。`
     const combinedInstructions=[packet.instructions,instructions].filter(Boolean).join('\n')
-    return {...envelope,status:slate.status,next_action,required_arguments,packet:{...packet,instructions:combinedInstructions},instructions:combinedInstructions}
+    return {...envelope,status:slate.status,next_action,required_arguments,packet:{...packet,instructions:combinedInstructions}}
   }
   const rows=store.journal.use(db=>db.prepare("SELECT payload FROM video_reads WHERE json_extract(payload,'$.feed.run_id')=? ORDER BY rowid DESC").all(run_id).map(r=>JSON.parse(r.payload)))
   for(const video of slate.selected??[]) {

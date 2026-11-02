@@ -175,3 +175,24 @@ node tools/bili.mjs observe serve --port 4399
 ## 探索路径扩展
 
 开发分支新增可配置的领域深挖、稀疏群回访和新词发现预算，以及问题线、实际曝光和进展记录。使用方式、算法边界及完整工具调用流程见[探索路径与问题进展](EXPLORATION.md)。普通决策保留 concept-v1 行为；探索预演额外归档 exploration-v1 规划。启用方式见探索说明中的部署与启用，运行状态以发布验收为准。
+
+
+### 日常返回与按需明细
+
+`exploration_next` 和 `feed_run` / `feed --json` 默认返回当前步骤的业务数据：搜索规划保留检索词及来源、当前目标和未解问题；候选判断保留实际候选原文、完整立场与相关度规则。自动流程一次只返回一个待判断候选。兴趣评分输入/输出、未选问题和回访列表仍按原版本归档，不在每次工具返回中重复发送，不改变竞争算法或实际选片。
+
+需要核对时，使用返回的 `details` 指针调用只读接口 `feed_details`：
+
+```json
+{"run_id":"原 run_id","stage":"search","section":"interest_competition","offset":0,"limit":5}
+```
+
+- `stage`：`search`（搜索规划）或 `judgment`（候选判断）的原始归档，旧 run 同样可查。
+- `section`：`interest_competition`、`member_competitions`、`questions`、`revisit`、`target_members`、`stances`、`candidates`。
+- `offset` / `limit`：分页，默认 5 项、最多 10 项；`next_offset` 为 null 表示结束，`continue_with` 给出下一页调用。
+- `member_competitions` 使用 `competition_index` 选择一场群内竞争，再分页读取评分行。评分行保留成员、理由和分项分数，不重复附带同一份评分输入。
+- 目标成员默认最多展示 3 条代表内容，每条最多 240 字符；`member_count` / `content_truncated` 标明范围。需要完整成员或此前的长篇阅读进展时分别查 `target_members` / `questions`，不要把摘要当完整原文。
+
+明细查询不重新规划、不访问平台、不修改状态或产生曝光。选片结果保留决策与预演 ID，完整决策用返回的 `trace_get` 指针及现有 `decision_replay` / `observation_object` 查询。
+
+CLI JSON 输出等待 stdout 写入回调完成后才退出，避免管道背压下 `console.log` 后立即 `process.exit` 截断尾部；大输出不能靠缩小正常返回来掩盖传输问题。

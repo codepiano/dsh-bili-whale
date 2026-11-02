@@ -1,3 +1,5 @@
+import { compactFeed } from '../lib/concept-system/feed-presentation.mjs'
+import { writeJson } from '../lib/json-output.mjs'
 import { guardedFetch as fetch } from '../lib/traffic.mjs'
 // 选题器：概念群竞争影响搜索与阅读清单。只读平台；active 会更新本地决策和疲劳。
 //
@@ -41,8 +43,8 @@ function printSlate(selection) {
 }
 const resumed=opt['run-id']?await concepts.resume({n:N,per:PER}):null
 if(resumed) {
-  if(resumed.status==='judgment_required'){console.log(JSON.stringify(resumed));process.exit(0)}
-  if(opt.json)console.log(JSON.stringify(resumed))
+  if(resumed.status==='judgment_required'){await writeJson(compactFeed(resumed));process.exit(0)}
+  if(opt.json)await writeJson(compactFeed(resumed))
   else {console.log(`恢复本轮原清单，不重新搜索或增加疲劳：run=${resumed.run_id} · seed=${resumed.seed}`);printSlate(resumed)}
   process.exit(0)
 }
@@ -96,7 +98,7 @@ function searchKeywordOf(p) {
 }
 const legacyKeywords = [...new Set(prefs.slice(0, 6).map(searchKeywordOf))]
 const interestSearch = await concepts.plan(legacyKeywords)
-if(interestSearch.status==='search_plan_required'){console.log(JSON.stringify(interestSearch));process.exit(0)}
+if(interestSearch.status==='search_plan_required'){await writeJson(compactFeed(interestSearch));process.exit(0)}
 const searchKeywords = interestSearch.keywords
 
 const cred = JSON.parse(fs.readFileSync(path.join(HOME, '.bili-ai', 'credentials.json'), 'utf8'))
@@ -312,7 +314,7 @@ for (const x of uniq) {
 
 const selection = await concepts.select({candidates:uniq,legacy:diversified,n:N,per:PER})
 if (opt.json || selection.status==='judgment_required') {
-  console.log(JSON.stringify({...selection,search:interestSearch,candidate_count:uniq.length}))
+  await writeJson({...compactFeed(selection),search:compactFeed(interestSearch),candidate_count:uniq.length})
 } else {
   console.log(`偏好（配置优先，旧日记兜底）: ${prefs.join(' · ')}`)
   console.log(`兴趣选题: ${selection.mode}${selection.run_id ? ' · run='+selection.run_id+' · seed='+selection.seed : ''}`)
