@@ -490,7 +490,7 @@ export async function planSearch(selector, legacyKeywords) {
             name: c.name,
           })),
           instructions:
-            "调用 feed_search_plan 提出1至4条短查询词与理由。interests 给出本轮正常兴趣竞争的关键词及来源成员，可作为与目标相关的检索线索，不得为命中关键词牺牲探索相关度。deep 围绕该未解问题补前置知识、反例和争议；revisit 针对该稀疏群补解释或应用实例，若其是立场则提出可检验的问题，不把立场声明当作事实或直接话题；discover 主动查当前概念图之外的陌生术语或领域。随后原参数重跑 feed 执行真实搜索，再按 judgment_required 调用 feed_assess 并恢复清单。",
+            "调用 feed_search_plan 提出1至4条短查询词与理由，并按问题选择 source=bilibili 或 web。需要文章、文档、论文、GitHub README/issue/commit 等证据时优先 web；不得因以往只支持视频而把所有问题局限于B站。web 使用宿主原生 web_search/web_fetch，不复制凭据或另换端点。interests 给出本轮正常兴趣竞争的关键词及来源成员，可作为与目标相关的检索线索，不得为命中关键词牺牲探索相关度。deep 围绕该未解问题补前置知识、反例和争议；revisit 针对该稀疏群补解释或应用实例，若其是立场则提出可检验的问题，不把立场声明当作事实或直接话题；discover 主动查当前概念图之外的陌生术语或领域。随后原参数重跑 feed 执行真实搜索，再按 judgment_required 调用 feed_assess 并恢复清单。",
         };
         const object = store.object(packet);
         if(interests)emit('feed.interests_planned',{run_id:runId,keywords:interests.keywords,keyword_sources:interests.keyword_sources??[],object:store.object(interests)},{trace_id:selector.trace,source:'feed'});
@@ -518,6 +518,7 @@ export async function planSearch(selector, legacyKeywords) {
     );
   const packet = store.getObject(existing.packet).content;
   if (!existing.response) return packet;
+  if(existing.resource_source==='web')return {status:'native_web_required',run_id:runId,instructions:'网页来源必须沿 exploration_next 使用宿主原生 web_search/web_fetch；不能用 B 站 feed 替代。',...automaticContinuation(store.state(),runId)};
   if (hash(s) !== existing.state_version)
     throw Error("Search evidence state changed; use a new run-id");
   return store.transaction({ key: "feed-plan:" + runId, input }, (d, emit) => {
@@ -549,6 +550,7 @@ export async function assessSearch(store, input) {
     (d, emit) => {
       const run = d.state.feed_searches?.[input.run_id];
       if (!run) throw Error("Unknown exploration search request");
+      if(input.source==='web'&&!Object.values(d.state.auto_exploration_cycles??{}).some(c=>input.run_id===`${c.id}-r${c.round}`))throw Error('Web resource planning requires an exploration_next cycle; native web_search remains available directly');
       if (run.response)
         throw Error("Search already planned; retry original idempotency key");
       if (run.state_version !== hash(d.state.concepts))
@@ -567,6 +569,7 @@ export async function assessSearch(store, input) {
         attribution: "caller_planned_queries_not_accepted_concepts",
       });
       run.response = object.hash;
+      run.resource_source = input.source ?? 'bilibili';
       emit(
         "feed.search_assessed",
         {

@@ -98,7 +98,7 @@ function searchKeywordOf(p) {
 }
 const legacyKeywords = [...new Set(prefs.slice(0, 6).map(searchKeywordOf))]
 const interestSearch = await concepts.plan(legacyKeywords)
-if(interestSearch.status==='search_plan_required'){await writeJson(compactFeed(interestSearch));process.exit(0)}
+if(['search_plan_required','native_web_required'].includes(interestSearch.status)){await writeJson(compactFeed(interestSearch));process.exit(0)}
 const searchKeywords = interestSearch.keywords
 
 const cred = JSON.parse(fs.readFileSync(path.join(HOME, '.bili-ai', 'credentials.json'), 'utf8'))

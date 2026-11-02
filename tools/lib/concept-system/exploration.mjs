@@ -322,6 +322,12 @@ export function mutateExploration(s, name, input, now, emit, links) {
       throw Error("Progress trace does not match decision");
     checkSources(s, input.source_ids);
     const engaged = ["engaged", "completed"].includes(input.outcome);
+    if(engaged&&d.feed_judgment?.read_policy==='resource-page-v1') {
+      const exposure=d.exploration.exposure
+      if(exposure?.scope!=='resource_page_delivered_not_whole_site_or_repository')throw Error('Read delivered resource body before exploration progress')
+      if(!input.source_ids.length||input.source_ids.some(id=>!exposure.source_ids.includes(id)))throw Error('Progress must cite this decision actual resource read')
+      if(!input.answered||!input.next_step)throw Error('Actual resource reading needs an answer and next step')
+    }
     if(engaged&&d.feed_judgment?.read_policy==='subtitle-pages-v1') {
       const exposure=d.exploration.exposure
       if(!['subtitle_pages_presented_not_watch_completion','transcript_pages_presented_not_watch_completion'].includes(exposure?.scope))throw Error('Read all subtitle pages before exploration progress')

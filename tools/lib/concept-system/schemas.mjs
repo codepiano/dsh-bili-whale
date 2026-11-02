@@ -15,10 +15,11 @@ const source = z
   .object({
     id,
     actor: z.enum(["user", "fish", "third_party"]),
-    type: z.enum(["conversation", "video", "feedback", "manual"]),
+    type: z.enum(["conversation", "video", "web", "feedback", "manual"]),
     excerpt: text,
     ref: z.string().max(2000).optional(),
     occurred_at: z.string().datetime().optional(),
+    web: z.object({url:z.string().url(),title:z.string().max(1000),part:z.number().int().min(1).max(24),parts:z.number().int().min(1).max(24),content_hash:z.string().regex(/^[a-f0-9]{64}$/)}).strict().optional(),
     video: z
       .object({
         bvid: z.string().regex(/^BV[0-9A-Za-z]{10}$/),
@@ -72,7 +73,7 @@ export const schemas = {
   persona_revision_rollback:z.object({revision_id:id,expected_hash:z.string().regex(/^[a-f0-9]{64}$/),reason:text}).strict(),
   concept_catalog:z.object({subject:subject.optional(),query:z.string().max(300).default(''),page:z.number().int().min(1).max(100000).default(1),limit:z.number().int().min(1).max(100).default(20)}).strict(),
   concept_catalog_update:z.object({key,...links,collection_id:id,...collectionMetadata,source_ids:z.array(id).min(1).max(20),reason:text}).strict(),
-  feed_details:z.object({run_id:id,stage:z.enum(['search','judgment']).default('search'),section:z.enum(['interest_competition','member_competitions','questions','revisit','target_members','stances','candidates']),offset:z.number().int().min(0).max(100000).default(0),limit:z.number().int().min(1).max(10).default(5),competition_index:z.number().int().min(0).max(100).default(0)}).strict(),
+  feed_details:z.object({run_id:id,stage:z.enum(['search','judgment','web']).default('search'),section:z.enum(['interest_competition','member_competitions','questions','revisit','target_members','stances','candidates','assessments','decisions','reads']),offset:z.number().int().min(0).max(100000).default(0),limit:z.number().int().min(1).max(10).default(5),competition_index:z.number().int().min(0).max(100).default(0)}).strict(),
   exploration_next:z.object({cycle_id:id.refine(v=>v.length<=80,'Cycle id too long')}).strict(),
   video_audio_status:z.object({read_id:id}).strict(),
   video_read_frames:z.object({read_id:id,times:z.array(z.number().finite().min(0)).min(1).max(6),reason:text}).strict(),
@@ -84,6 +85,7 @@ export const schemas = {
       key,
       run_id: id,
       queries: z.array(z.string().trim().min(2).max(40)).min(1).max(4),
+      source:z.enum(['bilibili','web']).optional(),
       reason: text,
     })
     .strict(),
@@ -349,3 +351,11 @@ export const schemas = {
     .strict(),
   decision_replay: z.object({ preview_id: id }).strict(),
 };
+
+// Resource APIs share the same relevance and signed stance constraints as videos.
+schemas.resource_assess=schemas.feed_assess.shape.assessments.element.omit({bvid:true}).extend({key,run_id:id,url:z.string().url().max(2000)}).strict();
+schemas.resource_read_page=z.object({read_id:id,page:z.number().int().min(1).max(24)}).strict();
+schemas.resource_knowledge_save=schemas.video_knowledge_save;
+schemas.resource_knowledge_get=schemas.video_knowledge_get;
+
+schemas.resource_unavailable=z.object({run_id:id,reason:text}).strict();

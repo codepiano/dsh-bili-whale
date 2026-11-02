@@ -1,3 +1,4 @@
+import {WebExploration} from './web-exploration.mjs'
 import {compactFeed} from './feed-presentation.mjs'
 import {config} from '../config.mjs'
 import {hash} from './store.mjs'
@@ -26,13 +27,25 @@ export async function nextExploration(store,{cycle_id},{signal,feed=runFeed,read
   if(cycle.status!=='active')return cycle.result
   const run_id=`${cycle_id}-r${cycle.round}`,args={run_id,seed:run_id,n:cycle.n,per:cycle.per,pool:cycle.pool,source:cycle.source}
   const state=store.state(),pending=state.feed_judgments?.[run_id]??state.feed_searches?.[run_id]
-  const committed=await store.transaction({state:false},d=>d.receipt('feed-select:'+run_id))
+  const committed=await store.transaction({state:false},d=>d.receipt('feed-select:'+run_id)??d.receipt('resource-select:'+run_id))
   if(!committed&&pending&&pending.state_version!==hash(state.concepts)) {
     await store.transaction({},(d,emit)=>{
       const current=d.state.auto_exploration_cycles[cycle_id]
+      if(d.state.web_runs?.[run_id])d.state.web_runs[run_id].phase='closed'
       if(current.round===cycle.round){current.round++;emit('exploration.cycle_continued',{cycle_id,previous_run_id:run_id,round:current.round,reason:'concept_state_changed_before_selection'},{source:'automatic_exploration'})}
       if(current.round>current.max_rounds){current.status='exhausted';current.result={cycle_id,status:'exhausted',next_action:'stop',reason:'连续状态冲突，保留现场，下次作息继续'};emit('exploration.cycle_exhausted',current.result,{source:'automatic_exploration'})}
     })
+    return nextExploration(store,{cycle_id},{signal,feed,readConfig})
+  }
+  if(state.feed_searches?.[run_id]?.resource_source==='web') {
+    const out=await new WebExploration(store).next(cycle,args)
+    if(out.status!=='round_exhausted')return out
+    if(cycle.round>=cycle.max_rounds)return store.transaction({},(d,emit)=>{
+      const result={cycle_id,run_id,status:'exhausted',next_action:'stop',reason:out.reason}
+      const current=d.state.auto_exploration_cycles[cycle_id];current.status='exhausted';current.result=result
+      d.state.web_runs[run_id].phase='closed';emit('exploration.cycle_exhausted',result,{source:'automatic_exploration'});return result
+    })
+    await store.transaction({},(d,emit)=>{d.state.web_runs[run_id].phase='closed';d.state.auto_exploration_cycles[cycle_id].round++;emit('exploration.cycle_continued',{cycle_id,previous_run_id:run_id,reason:out.reason},{source:'automatic_exploration'})})
     return nextExploration(store,{cycle_id},{signal,feed,readConfig})
   }
   const slate=await feed(args,{signal})
