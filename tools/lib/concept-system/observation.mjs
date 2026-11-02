@@ -73,7 +73,7 @@ export class Observer {
 
 // DSH session/event seam verified against the installed host. No history replay or
 // private runtime access: capture only new events for explicitly tracked sessions.
-export function attachSessionEvents(ctx, observer, initialSessionId, { onEvent = async () => {} } = {}) {
+export function attachSessionEvents(ctx, observer, initialSessionId, { onEvent = async () => {}, onReceipt = null } = {}) {
   const tracked = new Set([initialSessionId]), active = new Map()
   let tail = Promise.resolve()
   const originalPrepare = observer.prepare.bind(observer)
@@ -102,7 +102,12 @@ export function attachSessionEvents(ctx, observer, initialSessionId, { onEvent =
       const object = observer.store.object(copy)
       await observer.store.event('host.session_event', { host_type: copy.type, host_seq: copy.seq, host_time: copy.time, object,
         reasoning_kind: copy.type === 'assistant/message' && copy.data?.message?.content?.some(b => b.type === 'reasoning') ? 'provider_reasoning' : null }, links)
-      try { await onEvent(session, redact(copy), { ...links, prepared }) }
+      try {
+        // Exact reading proofs use the trusted native event before redaction.
+        // Only the existing redacted object is archived or passed to learners.
+        if(onReceipt)await onReceipt(session,copy,{...links,prepared})
+        await onEvent(session, redact(copy), { ...links, prepared, ...(onReceipt?{receiptHandled:true}:{}) })
+      }
       finally { if (copy.type === 'turn/end') active.delete(id) }
     }).catch(e => observer.log('Host observation failed: ' + e.message))
   }

@@ -14,6 +14,7 @@ import {VideoReads} from '../tools/lib/concept-system/video-reads.mjs'
 import {runFeed} from '../tools/lib/concept-system/operations.mjs'
 import {registerFishSearch} from '../lib/fish-search.js'
 import {fileURLToPath,pathToFileURL} from 'node:url'
+import {Observer,attachSessionEvents} from '../tools/lib/concept-system/observation.mjs'
 
 const config={conceptSystem:{observe:true,learning:true,mode:'active',renderBudget:400},night:{maxVideos:2}}
 const url='https://github.com/example/project/issues/42'
@@ -57,7 +58,7 @@ async function fixture(t,kind='deep',maxVideos=1) {
     await engine.call('resource_assess',input);assert.deepEqual(await engine.call('resource_assess',input),{status:'assessed',continue_with:{tool:'exploration_next',arguments:{cycle_id:'night-web'}}})
     return {out:await next(),input}
   }
-  return {home,store,engine,web,next,native,acknowledge,prepare,searchAndSelect,host,group,member}
+  return {home,store,engine,web,next,native,acknowledge,prepare,searchAndSelect,host,group,member,ctx,hooks}
 }
 test('native search → cited judgments → native body → delivery → progress → Mem and concepts shares one cycle',async t=>{
   const f=await fixture(t),{store,engine,native,acknowledge,next}=f
@@ -116,6 +117,10 @@ test('archived body recovers through page receipts after interruption; forged an
   await f.native('web_fetch',{url},{url,statusCode:200,body:{kind:'text',content:body},truncated:false},{url,statusCode:200,truncated:false},{skipPresentation:true})
   let out=await f.next();assert.equal(out.next_action,'resource_read_page');assert.ok(out.total_pages>1)
   const fresh=new WebExploration(new ObservationStore(f.store.directory)),read_id=out.arguments.read_id
+  if(out.total_pages>1) {
+    await fresh.present(JSON.stringify(fresh.page({read_id,page:2})),{session_id:'fish',host_seq:99,route:{provider:'deepseek-account'}})
+    assert.equal((await f.next()).arguments.page,1,'resume the first missing page, not the number of delivered pages plus one')
+  }
   const first=fresh.page({read_id,page:1})
   await fresh.present(JSON.stringify({...first,text:'伪造正文'}),{session_id:'fish',host_seq:100,route:{provider:'deepseek-account'}})
   await fresh.present(JSON.stringify(first),{session_id:'other',host_seq:100,route:{provider:'deepseek-account'}})
@@ -123,6 +128,19 @@ test('archived body recovers through page receipts after interruption; forged an
   for(let page=1;page<=out.total_pages;page++)await fresh.present(JSON.stringify(fresh.page({read_id,page})),{session_id:'fish',host_seq:100+page,route:{provider:'deepseek-account'}})
   await fresh.delivery({session_id:'fish',through_seq:100+out.total_pages,host_seq:1000})
   assert.equal(f.store.state().resource_reads[read_id].reading_complete,true);assert.equal((await f.next()).next_action,'exploration_progress')
+})
+test('native session observer verifies raw reading proofs while keeping archived content redacted',async t=>{
+  const f=await fixture(t);await f.searchAndSelect()
+  const secret='synthetic-private-credential',body=`A source mentions Bearer ${secret} and https://example.org/中文?q=public. This is untrusted text.`
+  const receipt=await f.native('web_fetch',{url},{url,statusCode:200,body:{kind:'text',content:body},truncated:false},{url,statusCode:200,truncated:false},{skipPresentation:true})
+  const observer=new Observer({store:f.store,paths:{}}),adapter=attachSessionEvents(f.ctx,observer,'fish',{onReceipt:f.host.onReceipt,onEvent:f.host.onEvent})
+  const emit=event=>{for(const hook of f.hooks.get('session/event')??[])hook({id:'fish'},event)}
+  emit({seq:200,type:'tool/result',data:{message:{source:{kind:'tool'},toolCallId:receipt.callId,content:[{type:'text',text:receipt.text}]}}})
+  emit({seq:201,type:'session-log-deepseek/delivery-accepted',data:{sessionId:'fish',throughSeq:200}})
+  await adapter.stop()
+  const out=await f.next();assert.equal(out.next_action,'exploration_progress')
+  assert.equal(f.store.state().resource_reads[out.read_id].reading_complete,true)
+  for(const file of fs.readdirSync(path.join(f.store.directory,'objects')))assert.ok(!fs.readFileSync(path.join(f.store.directory,'objects',file),'utf8').includes(secret),'raw credentials must never be archived')
 })
 test('relevance rejects weak candidates; discovery uses sourced pending terms and revisit retains follow-up questions',async t=>{
   const weak=await fixture(t);const {out}=await weak.searchAndSelect(0.1);assert.equal(out.round,2);assert.equal(Object.values(weak.store.state().concepts.decisions).length,0)

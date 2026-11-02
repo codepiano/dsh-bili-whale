@@ -47,7 +47,7 @@ export class WebExploration {
       if(video&&!read.session_id)return {...base,status:'awaiting_host_receipt',next_action:read.audio_draft?'video_audio_status':'wait',...(read.audio_draft?{arguments:{read_id:read.id}}:{read_id:read.id})}
       if(!read.reading_complete) {
         if(video){if(read.body_complete)return {...base,status:'awaiting_model_delivery',next_action:'wait',read_id:read.id};return {...base,status:'body_required',next_action:'video_read_page',arguments:{read_id:read.id,page:Array.from({length:read.sources.length},(_,i)=>i+1).find(p=>!read.pages_presented?.includes(p))},total_pages:read.sources.length}}
-        if(!Number.isSafeInteger(read.host_seq))return {...base,status:'resource_body_required',next_action:'resource_read_page',arguments:{read_id:read.id,page:(read.pages_presented?.length??0)+1},total_pages:read.sources.length,instructions:'从归档原文逐页恢复，不重新抓取。'}
+        if(!Number.isSafeInteger(read.host_seq))return {...base,status:'resource_body_required',next_action:'resource_read_page',arguments:{read_id:read.id,page:Array.from({length:read.sources.length},(_,i)=>i+1).find(p=>!read.pages_presented?.includes(p))},total_pages:read.sources.length,instructions:'从归档原文逐页恢复，不重新抓取。'}
         return {...base,status:'awaiting_resource_delivery',next_action:'wait',read_id:read.id,instructions:'等待正常宿主模型交付回执，不重抓或自编正文。'}
       }
       const decision=store.state().concepts.decisions[selected.decision_id],progress=decision.exploration.progress,source_ids=decision.exploration.exposure?.source_ids??read.sources.map(s=>s.id)
