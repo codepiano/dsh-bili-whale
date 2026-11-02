@@ -1,4 +1,5 @@
 import crypto from 'node:crypto'
+import {interestEligibility,readingPenalty,breadthSnapshot,collectionDomain} from './breadth.mjs'
 import { ObservationStore, hash, redact } from './store.mjs'
 import { scoreDecision, commitScoredDecision } from './engine.mjs'
 import { VideoReads } from './video-reads.mjs'
@@ -12,14 +13,16 @@ export function feedGroups(state) {
   return Object.values(state.collections).filter(c=>!c.archived_at&&c.subject==='fish').map(c=>({
     collection:c,
     members:c.members.map(id=>state.members[id]).filter(m=>m?.status==='accepted'&&m.subject==='fish'&&
-      m.tags.includes('topic')&&['explicit','mention'].includes(m.interpretation)&&['general','watch',scene].includes(m.scene)),
+      m.tags.includes('topic')&&interestEligibility(m,state,c).eligible&&['explicit','mention'].includes(m.interpretation)&&['general','watch',scene].includes(m.scene)),
   })).filter(g=>g.members.length).sort((a,b)=>a.collection.id.localeCompare(b.collection.id))
 }
 function termOf(m,c,seed) {
   const clean=s=>String(s).replace(/[\r\n\t]/g,' ').trim()
+  const termUseful=s=>useful(s)&&! /^(阅读|读到|讨论|需要|客户愿意|候选|检索结果|字幕为空|视频只有)/u.test(s)
   const terms=(m?.keywords??[]).map(clean).filter(useful)
   if(terms.length)return terms[seed?parseInt(hash([seed,m.id]).slice(0,8),16)%terms.length:0]
-  return [clean(m?.content??''),...(m?.triggers??[]).map(clean),clean(c.name)].find(useful)??null
+  const primary=clean(m?.content??'')
+  return [!/[。！？；;：:，,]/u.test(primary)?primary:'',clean(c.name),...(m?.triggers??[]).map(clean)].find(termUseful)??null
 }
 function containsTerm(title,term) {
   const value=normalized(term)
@@ -40,11 +43,15 @@ export function interestPlan(state,seed,now,limit=4) {
     options:groups.map(g=>({label:g.collection.id,eligible:true,reason:g.collection.name,
       contributions:g.members.filter(m=>termOf(m,g.collection)).sort((a,b)=>(a.interpretation==='explicit'?0:1)-(b.interpretation==='explicit'?0:1)||a.id.localeCompare(b.id)).slice(0,3).map(m=>contribution(g,m,1,'已评估的鱼话题线索；提及不等于喜欢'))}))}
   const preliminary=scoreDecision(state,input,now)
-  input.options=[...preliminary.rows].sort((a,b)=>b.score-a.score||a.label.localeCompare(b.label)).slice(0,20).map(r=>input.options.find(o=>o.label===r.label))
+  input.options=[...preliminary.rows].sort((a,b)=>b.score-a.score||a.label.localeCompare(b.label)).map(r=>input.options.find(o=>o.label===r.label))
   const competition=scoreDecision(state,input,now)
+  for(const row of competition.rows){const g=groups.find(g=>g.collection.id===row.label);row.reading_penalty=readingPenalty(state,g.collection,now);row.score*=row.reading_penalty.factor}
+  competition.winner=[...competition.rows].sort((a,b)=>b.score-a.score||a.label.localeCompare(b.label))[0]?.label
   const ranked=[...competition.rows].sort((a,b)=>b.score-a.score||a.label.localeCompare(b.label))
+  const first=[],rest=[],seenDomains=new Set()
+  for(const row of ranked){const domain=collectionDomain(groups.find(g=>g.collection.id===row.label).collection).name;if(seenDomains.has(domain))rest.push(row);else{first.push(row);seenDomains.add(domain)}}
   const keywords=[],member_competitions=[],keyword_sources=[]
-  for(const row of ranked) {
+  for(const row of [...first,...rest]) {
     const g=groups.find(g=>g.collection.id===row.label)
     const byTerm=new Map()
     for(const m of [...g.members].sort((a,b)=>(a.interpretation==='explicit'?0:1)-(b.interpretation==='explicit'?0:1)||a.id.localeCompare(b.id))) {
@@ -58,11 +65,12 @@ export function interestPlan(state,seed,now,limit=4) {
     const memberCompetition=scoreDecision(state,memberInput,now)
     member_competitions.push(memberCompetition)
     const m=g.members.find(m=>m.id===memberCompetition.winner),term=termOf(m,g.collection,seed)
-    keyword_sources.push({term,member_id:m.id,collection_id:g.collection.id})
+    keyword_sources.push({term,member_id:m.id,collection_id:g.collection.id,domain:collectionDomain(g.collection).name,reason:'先覆盖不同领域，再按分数补充；已读领域降权'})
     if(!keywords.some(k=>normalized(k)===normalized(term)))keywords.push(term)
     if(keywords.length>=limit)break
   }
-  return {keywords,competition,member_competitions,keyword_sources}
+  const excluded=Object.values(state.members??{}).filter(m=>m.status==='accepted'&&m.tags.includes('topic')).flatMap(m=>{const c=Object.values(state.collections).find(c=>c.members.includes(m.id));const e=interestEligibility(m,state,c);return e.eligible?[]:[{member_id:m.id,reason:e.reason}]})
+  return {keywords,competition,member_competitions,keyword_sources,breadth:breadthSnapshot(state),excluded}
 }
 export function videoContributions(video,groups) {
   const title=normalized(video.t),quality=Math.max(0,Number(video._score)||0)

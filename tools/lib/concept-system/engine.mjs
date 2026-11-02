@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { readingFatigue } from "./breadth.mjs";
 import { validateTopicLabel,topicKey } from "./topic-labels.mjs";
 import { matchesScene } from "./scenes.mjs";
 import { enrichMember } from "./member-enrichment.mjs";
@@ -41,10 +42,7 @@ const links = (input) => ({
   source: "concept_system",
 });
 function fatigue(c, scene, now, p) {
-  const f = own(c.fatigue, scene);
-  return f
-    ? f.value * 2 ** (-Math.max(0, now - f.at) / p.fatigueHalfLifeMs)
-    : 0;
+  return readingFatigue(c,scene,now,p);
 }
 function evidenceIdentity(s, sourceId) {
   const source = s.sources[sourceId];
@@ -212,6 +210,8 @@ export function commitScoredDecision(state, preview, input, now) {
             weights: preview.exploration.weights,
             available: preview.exploration.available,
             planner_reason: preview.exploration.planner_reason,
+            breadth:preview.exploration.breadth,
+            planned_domain:preview.exploration.path==='discover'?preview.exploration.discovery.target_domain:preview.exploration.questions.find(q=>q.id===row.target.question_id)?.domain??preview.exploration.revisit.find(g=>g.collection_id===row.target.collection_id)?.domain,
             reason: preview.exploration.reason,
             target: row.target,
             target_snapshot: row.target.question_id
@@ -299,8 +299,9 @@ export class ConceptEngine {
         } else if (name === 'concept_catalog_update') {
           const c=own(state.collections,input.collection_id);
           if(!c)throw Error('Unknown collection');
+          const previous_domain=c.domain??null;
           result=applyCatalogMetadata(state,c,input,{source_ids:input.source_ids,reason:input.reason,at:now});
-          emit('collection.catalog_updated',{collection_id:c.id,metadata_evidence:c.metadata_evidence},links(input));
+          emit('collection.catalog_updated',{collection_id:c.id,previous_domain,domain:c.domain??null,metadata_evidence:c.metadata_evidence},links(input));
         } else if (name === "concept_enrich") {
           result=enrichMember(this.store,d,emit,input,now);
         } else if (name === "concept_propose") {
@@ -374,6 +375,7 @@ export class ConceptEngine {
             delete c.archive_reason;
             if (!c.members.includes(m.id)) c.members.push(m.id);
             c.related = [...new Set([...c.related, ...spec.related])];
+            if(spec.domain&&!existing)c.domain=spec.domain;
             if(spec.definition&&!existing)applyCatalogMetadata(state,c,spec,{source_ids:[m.source_id],reason:spec.reason??input.reason,at:now});
             emit('collection.placement_decided',{candidate_id:m.id,collection_id:id,action:existing?'join':'create',reason:spec.reason??input.reason,source_id:m.source_id},links(input));
             ids.push(id);

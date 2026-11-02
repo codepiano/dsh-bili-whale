@@ -21,6 +21,7 @@ export function compactFeed(packet) {
   }
   const route = packet.exploration;
   result.exploration = pick(route, routeKeys);
+  if(route?.breadth)result.exploration.breadth={...route.breadth,domains:route.breadth.domains.slice(0,12)};
   if (route?.path === 'discover') result.exploration.discovery = route.discovery;
   const question = packet.target?.question ?? route?.question ?? route?.questions?.find(q => q.id === route.target?.question_id);
   if (packet.target) {
@@ -32,6 +33,7 @@ export function compactFeed(packet) {
   }
   if (question) result.exploration.question = pick(question, questionKeys);
   if (packet.interests) result.interests = pick(packet.interests, ['keywords', 'keyword_sources']);
+  if(packet.interests)result.interests.excluded_method_count=packet.interests.excluded?.length??0;
   result.details = {tool:'feed_details', arguments:{run_id:packet.run_id, stage:packet.status === 'search_plan_required' ? 'search' : 'judgment'}, sections:detailSections, instructions:'仅在需要更多依据时按 section 分页查询；评分已由程序完成，无需重新计算。'};
   return result;
 }

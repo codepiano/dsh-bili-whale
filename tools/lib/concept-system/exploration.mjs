@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import {interestEligibility,collectionDomain,questionDomain,breadthSnapshot,readingHistory} from "./breadth.mjs";
 import { matchesScene } from "./scenes.mjs";
 import { hash } from "./store.mjs";
 
@@ -22,7 +23,7 @@ const evidence = (s, c, scene) =>
         .filter(
           (m) =>
             m?.status === "accepted" &&
-            (!scene || matchesScene(m.scene,scene)),
+            (!scene || matchesScene(m.scene,scene)) && interestEligibility(m,s,c).eligible,
         )
         .map((m) => sourceKey(s, m.source_id)),
     ),
@@ -59,6 +60,10 @@ export function explorationQuery(s, input) {
   };
 }
 export function explorationPlan(s, input, now) {
+  const breadth=breadthSnapshot(s,input.subject,config(s).history_window);
+  const domainCount=c=>breadth.domains.find(d=>d.domain===collectionDomain(c).name)?.count??0;
+  const successful=readingHistory(s,input.subject);
+  const questionLast=q=>Math.max(0,...successful.filter(d=>d.exploration.target?.question_id===q.id).map(d=>d.exploration.exposure.at));
   const cfg = config(s),
     history = decisions(s, input.subject, input.scene).filter(exposed);
   history.sort(
@@ -81,10 +86,13 @@ export function explorationPlan(s, input, now) {
         s.collections[q.collection_id]?.subject === input.subject &&
         evidence(s, s.collections[q.collection_id], input.scene).length,
     )
-    .sort((a, b) => b.updated_at - a.updated_at || a.id.localeCompare(b.id));
+    .map(q=>({...q,domain:questionDomain(q,s.collections[q.collection_id]),last_read_at:questionLast(q),breadth_reason:"先补近期少读领域，再优先长期未读问题；不按最近修改时间追逐"}))
+    .sort((a,b)=>(breadth.domains.find(d=>d.domain===a.domain)?.count??0)-(breadth.domains.find(d=>d.domain===b.domain)?.count??0)||a.last_read_at-b.last_read_at||a.created_at-b.created_at||a.id.localeCompare(b.id));
+  const contentGroup=c=>c.members.some(id=>{const m=s.members[id];return m?.status==='accepted'&&m.tags.includes('topic')&&interestEligibility(m,s,c).eligible});
+  const hasContent=Object.values(s.collections).some(c=>!c.archived_at&&c.subject===input.subject&&contentGroup(c));
   const groups = Object.values(s.collections)
     .filter(
-      (c) => !c.archived_at && c.subject === input.subject && evidence(s, c, input.scene).length,
+      (c) => !c.archived_at && c.subject === input.subject && (!hasContent||contentGroup(c)) && evidence(s, c, input.scene).length,
     )
     .map((c) => {
       const sources = evidence(s, c, input.scene);
@@ -110,6 +118,8 @@ export function explorationPlan(s, input, now) {
         ? Math.min(1, Math.max(0, now - last) / (7 * 86400000))
         : 1;
       return {
+        domain:collectionDomain(c).name,
+        recent_domain_reads:domainCount(c),
         collection_id: c.id,
         name: c.name,
         independent_sources: sources.length,
@@ -122,6 +132,7 @@ export function explorationPlan(s, input, now) {
     })
     .sort(
       (a, b) =>
+        a.recent_domain_reads-b.recent_domain_reads ||
         b.priority - a.priority ||
         a.collection_id.localeCompare(b.collection_id),
     );
@@ -185,9 +196,13 @@ export function explorationPlan(s, input, now) {
     available,
     unavailable: paths.filter((p) => !available[p]),
     reason: `选择 ${path}：目标比例 ${Math.round(cfg.ratios[path] * 100)}%，最近 ${recent.length} 次实际曝光中占 ${counts[path]} 次，当前欠额 ${weights[path].toFixed(3)}；不可用路径暂时排除，零比例路径不参与`,
+    breadth,
     questions: open.slice(0, input.limit),
     revisit: revisit.slice(0, input.limit),
     discovery: {
+      target_domain:breadth.domains.filter(d=>d.domain!=="未分类")[0]?.domain??null,
+      recent_domains:breadth.domains.filter(d=>d.count>0).map(d=>({domain:d.domain,reads:d.count})),
+      breadth_rule:"优先 target_domain 的陌生对象或当前图谱之外的领域，不能只在近期热门领域换术语；检索理由说明领域选择，无相关材料如实耗尽",
       adjacent:
         "检索当前内容中的陌生术语、前置概念、参考来源及争议，再携原文提交 concept_propose",
       distant: "另检索近期少见领域的真实内容，避免新词全部来自当前领域",

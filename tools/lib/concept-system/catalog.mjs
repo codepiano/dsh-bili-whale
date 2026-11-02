@@ -1,4 +1,5 @@
 import { hash } from './store.mjs'
+import {collectionDomain} from './breadth.mjs'
 
 // Identity matching is deliberately narrower than semantic similarity. Synonyms
 // require an explicit alias or a model judgment against the directory.
@@ -13,7 +14,7 @@ function entry(state, c) {
   const members = c.members.map(id => state.members?.[id]).filter(m => m?.status === 'accepted')
   return {
     id:c.id, subject:c.subject, name:c.name, aliases:c.aliases ?? [],
-    definition:c.definition ?? null, boundary:c.boundary ?? null,
+    definition:c.definition ?? null, boundary:c.boundary ?? null, domain:collectionDomain(c),
     metadata_status:c.definition ? 'documented' : 'needs_definition',
     related:c.related ?? [], member_count:members.length,
     representatives:members.slice().sort((a,b)=>a.id.localeCompare(b.id)).slice(0,3).map(m=>({id:m.id,content:m.content.slice(0,400),tags:m.tags,source_id:m.source_id})),
@@ -71,6 +72,7 @@ export function applyCatalogMetadata(state,c,spec,{source_ids,reason,at}) {
   for(const id of source_ids) {
     if(!c.members.some(mid=>state.members[mid]?.source_id===id))throw Error('Catalog evidence must belong to the collection')
   }
+  if(spec.domain)c.domain=spec.domain;
   c.definition=spec.definition;c.boundary=spec.boundary
   c.aliases=[...new Set(spec.aliases ?? [])]
   c.related=[...new Set([...(c.related ?? []),...(spec.related ?? [])])]

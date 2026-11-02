@@ -490,7 +490,7 @@ export async function planSearch(selector, legacyKeywords) {
             name: c.name,
           })),
           instructions:
-            "调用 feed_search_plan 提出1至4条短查询词与理由，并按问题选择 source=both（同时B站与独立DS Search API）、bilibili 或 web。需要文章、文档、论文、GitHub README/issue/commit 等证据时优先 web；不得因以往只支持视频而把所有问题局限于B站。web 使用鱼专用 fish_web_search/fish_web_fetch（固定独立DS Search/Fetch API），不复制凭据或另换端点。interests 给出本轮正常兴趣竞争的关键词及来源成员，可作为与目标相关的检索线索，不得为命中关键词牺牲探索相关度。deep 围绕该未解问题补前置知识、反例和争议；revisit 针对该稀疏群补解释或应用实例，若其是立场则提出可检验的问题，不把立场声明当作事实或直接话题；discover 主动查当前概念图之外的陌生术语或领域。随后原参数重跑 feed 执行真实搜索，再按 judgment_required 调用 feed_assess 并恢复清单。",
+            "调用 feed_search_plan 提出1至4条短查询词与理由，并按问题选择 source=both（同时B站与独立DS Search API）、bilibili 或 web。需要文章、文档、论文、GitHub README/issue/commit 等证据时优先 web；不得因以往只支持视频而把所有问题局限于B站。web 使用鱼专用 fish_web_search/fish_web_fetch（固定独立DS Search/Fetch API），不复制凭据或另换端点。interests 给出本轮正常兴趣竞争的关键词及来源成员，可作为与目标相关的检索线索，不得为命中关键词牺牲探索相关度。deep 按 breadth 与问题排序选择的未解问题补前置知识、反例和争议，不因刚更新就一直追同题；revisit 按领域覆盖与稀疏度选择的群补解释或应用实例，若其是立场则提出可检验的问题，不把立场声明当作事实或直接话题；discover 优先 discovery.target_domain 或当前概念图之外的领域，至少一条查询跨出 recent_domains 中集中阅读的领域，不只在软件/AI里换新词；在检索理由里说明领域选择。随后原参数重跑 feed 执行真实搜索，再按 judgment_required 调用 feed_assess 并恢复清单。",
         };
         const object = store.object(packet);
         if(interests)emit('feed.interests_planned',{run_id:runId,keywords:interests.keywords,keyword_sources:interests.keyword_sources??[],object:store.object(interests)},{trace_id:selector.trace,source:'feed'});

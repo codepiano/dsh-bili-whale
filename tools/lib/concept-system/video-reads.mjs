@@ -1,3 +1,4 @@
+import { readingDomain } from './breadth.mjs';
 import crypto from 'node:crypto'
 import { ObservationStore,hash,redact } from './store.mjs'
 import { enqueueLearningSource } from './learning.mjs'
@@ -154,6 +155,7 @@ export class VideoReads {
             scope:next.kind==='audio_transcript'?"transcript_pages_presented_not_watch_completion":next.read_policy?"subtitle_pages_presented_not_watch_completion":"subtitle_material_presented_not_watch_completion",
             attribution: "host_tool_result_receipt",
           };
+          if(!previous)decision.exploration.domain=readingDomain(d.state.concepts,decision);
           decision.exploration.exposure = exposure;
           const object = this.store.object(d.state.concepts),
             version = {

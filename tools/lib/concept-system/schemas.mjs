@@ -55,6 +55,7 @@ const target = z
   })
   .strict();
 export const collectionMetadata = {
+  domain:z.string().trim().min(1).max(80).optional().describe("跨群共享的内容领域；避免把每个概念群当成一个领域"),
   definition:z.string().trim().min(1).max(600),
   boundary:z.string().trim().min(1).max(600),
   aliases:z.array(z.string().trim().min(1).max(100)).max(12).default([]),
@@ -65,7 +66,7 @@ export const collectionPlacement = z.union([
   z.object({name:z.string().trim().min(1).max(100),...collectionMetadata,reason:z.string().trim().min(1).max(1000)}).strict(),
 ]);
 export const schemas = {
-  concept_enrich:z.object({key,...links,candidate_id:id,label:z.string().trim().min(1).max(40).optional(),replace_keywords:z.boolean().optional(),keywords:z.array(z.string().trim().min(1).max(40)).min(1).max(20),evidence:z.array(z.union([z.object({source_id:id,quote:z.string().trim().min(1).max(600)}).strict(),z.object({read_id:id,page:z.number().int().min(1).max(24),quote:z.string().trim().min(1).max(600)}).strict()])).min(1).max(20),reason:text}).strict(),
+  concept_enrich:z.object({key,...links,candidate_id:id,interest_role:z.enum(["content","method"]).optional(),label:z.string().trim().min(1).max(40).optional(),replace_keywords:z.boolean().optional(),keywords:z.array(z.string().trim().min(1).max(40)).min(1).max(20),evidence:z.array(z.union([z.object({source_id:id,quote:z.string().trim().min(1).max(600)}).strict(),z.object({read_id:id,page:z.number().int().min(1).max(24),quote:z.string().trim().min(1).max(600)}).strict()])).min(1).max(20),reason:text}).strict(),
   video_knowledge_save:z.object({read_id:id,summary:z.string().trim().min(20).max(4000),thoughts:z.string().trim().max(3000).default(''),questions:z.array(z.string().trim().min(1).max(500)).max(8).default([]),quotes:z.array(z.object({source_id:id,quote:z.string().trim().min(1).max(600)}).strict()).min(1).max(6)}).strict(),
   video_knowledge_get:z.object({read_id:id}).strict(),
   persona_revision_retry:z.object({attempt_id:id,expected_hash:z.string().regex(/^[a-f0-9]{64}$/),reason:text}).strict(),
@@ -185,6 +186,7 @@ export const schemas = {
       source,
       subject: z.enum(["user", "fish"]),
       content: text.describe("topic 主名称必须是1-40字名词/名词短语，不能写解释句；具体人物、事件、理论、现象等均可直接命名。"),
+      interest_role:z.enum(["content","method"]).optional().describe("content=内容探索对象，method=检索、工具、保存和任务操作经验；method不参与兴趣生成"),
       description:text.optional().describe("概念的解释与理解，和主名称分开保存"),
       keywords:z.array(z.string().trim().min(1).max(40)).min(1).max(20).optional().describe("正文中有依据的检索名词，优先于长说明用于检索"),
       tags: z
@@ -223,6 +225,7 @@ export const schemas = {
               name: z.string().trim().min(1).max(100).optional(),
               collection_id:id.optional(),
               reason:z.string().trim().min(1).max(1000).optional(),
+              domain:collectionMetadata.domain,
               definition:collectionMetadata.definition.optional(),
               boundary:collectionMetadata.boundary.optional(),
               aliases:collectionMetadata.aliases.optional(),

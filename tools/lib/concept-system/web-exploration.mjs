@@ -1,3 +1,4 @@
+import { readingDomain } from './breadth.mjs';
 import {readingBudget,recordCompletedRead,settleExplorationCycle} from './exploration-budget.mjs'
 import {VideoReads,isVideoTextKind} from './video-reads.mjs'
 import crypto from 'node:crypto'
@@ -221,6 +222,7 @@ export class WebExploration {
     const decision=d.state.concepts?.decisions[read.feed.decision_id];if(!decision?.exploration)throw Error('Resource decision disappeared')
     for(const spec of read.sources){const source=this.store.getObject(spec.object.hash).content;d.state.concepts.sources[source.id]??=source}
     read.reading_complete=true;read.read_completed_at=new Date(this.store.now()).toISOString()
+    decision.exploration.domain=readingDomain(d.state.concepts,decision)
     decision.exploration.exposure={read_id:read.id,url:read.url,at:this.store.now(),source_ids:read.sources.map(s=>s.id),scope:'resource_page_delivered_not_whole_site_or_repository',attribution:'host_native_tool_receipt'}
     const object=this.store.object(d.state.concepts),version={id:crypto.randomUUID(),role:'concept_state',status:'present',hash:object.hash,redacted:object.redacted,actor:'resource_receipt',at:new Date(this.store.now()).toISOString()}
     d.addVersion(version);emit('snapshot.captured',version,{session_id:read.session_id})
