@@ -107,3 +107,10 @@ node tools/bili.mjs concept exploration_query --json '{"subject":"fish","scene":
 ## 自动选片与立场闭环
 
 active feed 已增加探索查询规划和带引文的立场判断阶段，并与真实字幕回执及原生上下文接收回执关联。操作协议与旧权重先验见[立场、探索与真实上下文闭环](STANCE-EXPLORATION-LOOP.md)。
+
+
+## 夜间实际阅读预算
+
+`night.maxVideos` 是一次唤醒的实际阅读上限，默认 5，不是“选出 5 条但只读第一条”。同一 cycle 会按清单继续阅读、记录进展并执行逐条知识维护；本轮清单处理完且仍有预算时，继续下一轮正常检索，总共最多三轮。每轮清单大小在创建时固定，后续轮次只申请剩余阅读条数。无字幕/转写正文、失败或截断不占实际读完条数；完整交付正文并记录进展的条目按唯一视频计数，重试不重复计入。
+
+工具响应包含 `reading_budget`（limit/completed/remaining），最终结果带 `readings` 与 `stop_reason`。只有达到阅读上限或三轮结束才返回 stop；读到部分材料后轮数耗尽会如实返回 complete 与不足的实际数量，完全未读到则为 exhausted。不改变唤醒次数、分享配额、探索比例或相关度门槛，也不为了凑数选择无关内容。
