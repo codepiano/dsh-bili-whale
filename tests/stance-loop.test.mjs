@@ -552,7 +552,14 @@ test('normal automatic cycle continues after missing subtitles, requires full re
  await engine.call('exploration_progress',{key:'daily-progress',decision_id:out.decision_id,outcome:'engaged',source_ids:out.source_ids,answered:'读到了独立重复与误差的关系',remaining:'误差从何而来？',next_step:'找方法细节',reason:'完整正文'})
  out=await next();assert.equal(out.next_action,'exploration_question')
  await engine.call('exploration_question',{key:'daily-question',collection_id:out.collection_id,source_ids:out.source_ids,question:'怎样控制独立重复中的测量误差？',next_step:'找测量控制实例',reason:'实际字幕未决问题'})
- out=await next();assert.equal(out.status,'complete');const before=invocations
+ out=await next();assert.equal(out.next_action,'debrief_read');assert.deepEqual(out.reading_budget,{limit:2,completed:1,remaining:1})
+ const second=await reads.start(out.arguments.bvid,{feed_run_id:out.run_id}),secondReceipt=await reads.complete(second.id,{bvid:second.bvid,cid:'457',duration:30,subtitles:[{from:0,to:10,content:'第二份材料给出了另一种测量控制方法。'}]})
+ await reads.acceptOutput(secondReceipt.marker,{session_id:'fish'});out=await next()
+ await reads.acceptOutput(JSON.stringify(await engine.call(out.next_action,out.arguments)),{session_id:'fish'});out=await next()
+ await engine.call('exploration_progress',{key:'daily-progress-2',decision_id:out.decision_id,outcome:'engaged',source_ids:out.source_ids,answered:'第二条补充了控制方法',remaining:'仍需独立比较',next_step:'比较方法',reason:'第二份实际正文'})
+ out=await next();assert.equal(out.next_action,'exploration_question')
+ await engine.call('exploration_question',{key:'daily-question-2',collection_id:out.collection_id,source_ids:out.source_ids,question:'两种控制方法怎样比较？',next_step:'比较实验',reason:'第二份实际正文的后续问题'})
+ out=await next();assert.equal(out.status,'complete');assert.equal(out.readings.length,2);assert.deepEqual(out.reading_budget,{limit:2,completed:2,remaining:0});const before=invocations
  assert.deepEqual(await nextExploration(new ObservationStore(store.directory),{cycle_id:'daily'},options),out);assert.equal(invocations,before)
  assert.equal(store.events({type:'exploration.cycle_completed'}).length,1)
 })
@@ -569,6 +576,36 @@ test('automatic exploration bounds empty rounds, preserves exhaustion, and disab
  await store.transaction({state:false},d=>{const r=d.reads.get(stale.id);d.reads.put({...r,started_at:new Date(Date.now()-480001).toISOString()})})
  const continued=await nextExploration(store,{cycle_id:'stale'},{...options,feed:async()=>({status:'selected',selected:[videos[0]]})})
  assert.equal(continued.round,2);assert.equal(continued.next_action,'debrief_read');assert.equal((await reads.get(stale.id)).status,'failed')
+})
+
+test('actual reading budget spans rounds, keeps current slate arguments fixed, and excludes missing text and retries',async t=>{
+ const {nextExploration}=await import('../tools/lib/concept-system/auto-exploration.mjs'),{store,engine}=await fixture(t),reads=new VideoReads(store)
+ const pool=Array.from({length:6},(_,i)=>({...videos[i%2],bv:'BV000000000'+(i+1)})),calls=[]
+ const options={readConfig:()=>({...config,night:{maxVideos:2}}),feed:async args=>{
+   calls.push({round:Number(args.run_id.split('-r').at(-1)),n:args.n})
+   const f=new FeedConcepts({config,store,runId:args.run_id,seed:args.seed}),saved=await f.resume({n:args.n,per:args.per});if(saved)return saved
+   const plan=await f.plan(['测量']);if(plan.status==='search_plan_required')return plan
+   const candidates=args.run_id.endsWith('-r1')?pool.slice(0,2):pool.slice(2,4)
+   return f.select({candidates,legacy:candidates,n:args.n,per:args.per})
+ }}
+ let failed=false,out,steps=0
+ while(++steps<80) {
+   out=await nextExploration(store,{cycle_id:'budget'},options)
+   if(out.next_action==='stop')break
+   if(out.next_action==='feed_search_plan')await engine.call(out.next_action,{...out.required_arguments,queries:['测量误差 方法'],reason:'正常检索'})
+   else if(out.next_action==='feed_assess')await engine.call(out.next_action,{...out.required_arguments,assessments:assessments(out.packet)})
+   else if(out.next_action==='debrief_read') {
+     const read=await reads.start(out.arguments.bvid,{feed_run_id:out.run_id}),packet={bvid:read.bvid,cid:'123',duration:10,...(!failed?{description:'只有简介'}:{subtitles:[{from:0,to:10,content:'可独立复查的测量控制方法。'}]})};failed=true
+     await reads.acceptOutput((await reads.complete(read.id,packet)).marker,{session_id:'fish'})
+   } else if(out.next_action==='video_read_page')await reads.acceptOutput(JSON.stringify(await engine.call(out.next_action,out.arguments)),{session_id:'fish'})
+   else if(out.next_action==='exploration_progress')await engine.call(out.next_action,{key:'progress-'+out.read_id,decision_id:out.decision_id,outcome:'engaged',source_ids:out.source_ids,answered:'取得一种方法',remaining:'需比较',next_step:'寻找另一种方法',reason:'实际正文'})
+   else if(out.next_action==='exploration_question')await engine.call(out.next_action,{key:'question-'+out.decision_id,collection_id:out.collection_id,source_ids:out.source_ids,question:'还有哪些方法可对照？',next_step:'找对照材料',reason:'实际正文的后续问题'})
+   else assert.fail('Unexpected action '+out.next_action)
+ }
+ assert.equal(out.status,'complete');assert.equal(out.stop_reason,'reading_limit');assert.equal(out.round,2);assert.deepEqual(out.reading_budget,{limit:2,completed:2,remaining:0})
+ assert.ok(calls.filter(c=>c.round===1).every(c=>c.n===2));assert.ok(calls.filter(c=>c.round===2).every(c=>c.n===1))
+ assert.equal(store.events({type:'exploration.read_completed'}).length,2);assert.equal(store.events({type:'exploration.exposed'}).length,2)
+ const before=calls.length;assert.deepEqual(await nextExploration(new ObservationStore(store.directory),{cycle_id:'budget'},options),out);assert.equal(calls.length,before)
 })
 
 test('automatic cycle advances a stale search instead of asking the model to reroll or reuse invalid judgments',async t=>{
