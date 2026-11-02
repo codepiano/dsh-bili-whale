@@ -252,3 +252,17 @@ test('scheduled both-source default runs the real isolated Bilibili command alon
   assert.ok(all.items.some(c=>c.kind==='video'));assert.ok(all.items.some(c=>c.kind==='web'))
   assert.ok(fs.readFileSync(requests,'utf8').split('\n').filter(Boolean).every(l=>JSON.parse(l).method==='GET'))
 })
+
+test('challenge pages are not readings; caller-reported unusable bodies skip without spending the budget',async t=>{
+  const f=await fixture(t);await f.searchAndSelect();
+  const body="Client Challenge\nA required part of this site couldn’t load. Please check your connection.";
+  await f.native('web_fetch',{url},{url,body:{content:body}},{url,statusCode:200,truncated:false});await f.acknowledge();
+  assert.equal(Object.values(f.store.state().resource_reads)[0].status,'failed');
+  assert.equal(f.store.events({type:'exploration.exposed'}).length,0);
+  const g=await fixture(t);await g.searchAndSelect();
+  const content='Login required to read the article. No actual source content is available.';
+  await g.native('web_fetch',{url},{url,body:{content}},{url,statusCode:200,truncated:false});await g.acknowledge();
+  const out=await g.next();assert.equal(out.status,'progress_required');assert.match(out.instructions,/outcome:failed/);
+  await g.engine.call('exploration_progress',{key:'failed-body',decision_id:out.decision_id,outcome:'failed',source_ids:out.source_ids,reason:'Only a login page was delivered, not the selected article'});
+  await g.next();assert.equal(g.store.state().auto_exploration_cycles['night-web'].completed_reads?.length??0,0);
+});

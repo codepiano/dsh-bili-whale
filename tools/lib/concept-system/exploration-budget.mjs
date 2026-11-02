@@ -5,6 +5,7 @@ export const readingBudget = cycle => ({limit:cycle.n,completed:cycle.completed_
 export function recordCompletedRead(store,cycle_id,read,decision,progress) {
   return store.transaction({},(d,emit)=>{
     const cycle=d.state.auto_exploration_cycles[cycle_id]
+    if(!['engaged','completed'].includes(progress.outcome))return cycle
     cycle.completed_reads??=[]
     if(!cycle.completed_reads.some(r=>r.read_id===read.id||(read.bvid&&r.bvid===read.bvid)||(read.url&&r.url===read.url))) {
       const entry={read_id:read.id,decision_id:decision.id,...(read.url?{url:read.url}:{bvid:read.bvid}),path:decision.exploration.path,source_ids:decision.exploration.exposure?.source_ids??[],outcome:progress.outcome,round:cycle.round}

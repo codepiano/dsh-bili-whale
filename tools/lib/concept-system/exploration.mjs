@@ -344,7 +344,7 @@ export function mutateExploration(s, name, input, now, emit, links) {
         input.question_status)
     )
       throw Error(
-        "Skipped or failed exploration cannot report question progress",
+        "Skipped or failed exploration cannot report question progress; retry with outcome, source_ids and reason only (omit answered, remaining, next_step and question_status), then continue exploration_next",
       );
     const q = state.questions[d.exploration.target.question_id];
     if (input.question_status && !q)
