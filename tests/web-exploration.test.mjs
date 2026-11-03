@@ -296,3 +296,10 @@ test('legacy global fetch and a spoofed provider cannot become the new reading e
  await assert.rejects(f.native('web_fetch',{url},{provider:'http',url,body:{content:'other provider'}},{url,statusCode:200,truncated:false}),/provider identity mismatch/);
  assert.equal(Object.keys(f.store.state().resource_reads??{}).length,0);
 });
+
+test('DS Fetch challenge text without its page heading is rejected before page delivery or exposure',async t=>{
+ const f=await fixture(t);await f.searchAndSelect();
+ const body='A required part of this site couldn’t load. This may be due to a browser extension, network issues, or browser settings. Please check your connection, disable any ad blockers, or try using a different browser.';
+ await f.native('web_fetch',{url},{url,body:{kind:'text',content:body}},{url,statusCode:200,truncated:false});await f.acknowledge();
+ const read=Object.values(f.store.state().resource_reads)[0];assert.equal(read.error_code,'CHALLENGE_PAGE');assert.equal(read.status,'failed');assert.equal(read.reading_complete,false);assert.equal(read.fetch_receipt.provider,'deepseek-fetch-api');assert.equal(f.store.events({type:'exploration.exposed'}).length,0);assert.equal(pendingVideoKnowledge(f.store,'fish').length,0);
+});
