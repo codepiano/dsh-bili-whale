@@ -311,3 +311,85 @@ test('DS Fetch challenge text without its page heading is rejected before page d
  await f.native('web_fetch',{url},{url,body:{kind:'text',content:body}},{url,statusCode:200,truncated:false});await f.acknowledge();
  const read=Object.values(f.store.state().resource_reads)[0];assert.equal(read.error_code,'CHALLENGE_PAGE');assert.equal(read.status,'failed');assert.equal(read.reading_complete,false);assert.equal(read.fetch_receipt.provider,'deepseek-fetch-api');assert.equal(f.store.events({type:'exploration.exposed'}).length,0);assert.equal(pendingVideoKnowledge(f.store,'fish').length,0);
 });
+
+test('normal five-reading cycle spends per-target budgets and changes actual domain using unchanged seeds and native delivery receipts',async t=>{
+ const f=await fixture(t,'deep',5),{store,engine,next,native,acknowledge}=f
+ const placements={}
+ for(const [domain,name] of [['历史与社会','历史记忆'],['哲学与认知','语言哲学']]){
+  const m=await engine.call('concept_propose',{key:'domain-'+name,subject:'fish',content:name,tags:['topic'],source:{id:'source-'+name,actor:'third_party',type:'manual',excerpt:'材料讨论'+name}})
+  const r=await engine.call('concept_review',{key:'place-'+name,candidate_id:m.id,status:'accepted',reason:'正文内容领域',collections:[{name,domain}]});placements[domain]=r.collection_ids[0]
+ }
+ await engine.call('exploration_configure',{key:'normal-ratios',ratios:{deep:.6,revisit:.25,discover:.15},reason:'保持正常默认比例'})
+ await store.transaction({},d=>{
+  const s=d.state.concepts;s.collections[f.group].domain='软件与工程';placements['软件与工程']=f.group
+  // Regression shape from the real night: under-quota deep can repeatedly win,
+  // while the only active questions concern software. No seed is searched for.
+  for(let i=0;i<21;i++)s.decisions['history-'+i]={id:'history-'+i,subject:'fish',scene:'watch',selected:'historical-'+i,at:store.now()-1000-i,collection_ids:[f.group],exploration:{path:i<10?'deep':i<19?'revisit':'discover',domain:'软件与工程',target:{collection_id:f.group},exposure:{at:store.now()-1000-i,read_id:'historical-'+i,source_ids:['topic']},progress:{outcome:'completed'}}}
+ })
+ const memories=new Map(),knowledge=new VideoKnowledge(store,{run:async(args,content)=>{if(args[1]==='add'){memories.set(args[args.indexOf('--id')+1],content);return {ok:true}}return {memory:{id:args[2],content:memories.get(args[2])}}}})
+ let out,steps=0;const readbacks=[]
+ while(++steps<100){
+  out=await next();if(out.next_action==='stop')break
+  if(out.next_action==='feed_search_plan'){
+   const domain=out.packet.exploration.selected_domain
+   await engine.call('feed_search_plan',{...out.required_arguments,source:'web',queries:[domain+' 原始文献'],reason:'按本轮目标领域找实际材料'});continue
+  }
+  if(out.next_action==='fish_web_search'){
+   const packet=store.getObject(store.state().feed_searches[out.run_id].packet).content,domain=packet.exploration.selected_domain
+   const sources=Array.from({length:3},(_,i)=>({url:`https://example.org/${out.run_id}/${i}`,title:domain+' 主题文献'+i,snippet:domain+out.run_id+'理论'+i+' 有原始材料和边界说明'}))
+   sources.push({url:`https://example.org/${out.run_id}/wrong`,title:'软件工程测试',snippet:'软件工程测试有很高相关度和很多实测数据'})
+   await native('web_search',out.arguments,{sources,truncated:false});continue
+  }
+  if(out.next_action==='resource_assess'){
+   const v=out.packet.candidates[0],wrong=v.url.endsWith('/wrong'),domain=wrong?'软件与工程':out.packet.exploration.selected_domain,term=wrong?'软件工程测试':v.snippet.split(' ')[0]
+   const input={...out.required_arguments,url:v.url,exploration:{relevance:1,domain,quote:v.title,reason:'按真实标题和摘要判断领域及相关性'},stances:out.packet.stances.map(s=>({collection_id:s.collection_id,member_id:s.member_id,strength:1,quote:v.title,reason:'支持阅读原始材料'})),...(out.packet.exploration.path==='discover'?{discovered_term:term}:{})}
+   if(out.packet.exploration.breadth_guard.required_domain){const missing={...input,exploration:{...input.exploration}};delete missing.exploration.domain;await assert.rejects(engine.call('resource_assess',{...missing,key:missing.key+'-missing'}),/requires exploration.domain/)}
+   await engine.call('resource_assess',input);continue
+  }
+  if(out.status==='resource_read_required'){
+   const packet=store.getObject(store.state().feed_searches[out.run_id].packet).content,domain=out.arguments.url.endsWith('/wrong')?'软件与工程':packet.exploration.selected_domain,i=out.arguments.url.split('/').at(-1),term=domain+out.run_id+'理论'+i
+   const body=term+' 是该领域的一个具体对象。本文提供原始材料，并说明适用边界，不能推广成未经证实的结论。'
+   const receipt=await native('web_fetch',out.arguments,{url:out.arguments.url,statusCode:200,body:{kind:'text',content:body},truncated:false},{url:out.arguments.url,statusCode:200,truncated:false});await acknowledge(receipt.seq);continue
+  }
+  if(out.next_action==='exploration_progress'){
+   const d=store.state().concepts.decisions[out.decision_id],r=store.state().resource_reads[out.read_id],source=store.state().concepts.sources[out.source_ids[0]]
+   if(d.exploration.path==='discover'){
+    const m=store.state().concepts.members[d.exploration.target.candidate_id],domain=d.exploration.candidate_domain
+    await engine.call('concept_enrich',{key:'e-'+r.id,candidate_id:m.id,keywords:[m.content],evidence:[{read_id:r.id,page:1,quote:m.content}],reason:'从实际全文补原始来源'})
+    await engine.call('concept_review',{key:'p-'+r.id,candidate_id:m.id,status:'accepted',reason:'实际正文支持该内容领域',collections:[{collection_id:placements[domain],reason:'正文主题一致'}]})
+   }
+   const saved=await knowledge.save({read_id:r.id,summary:'实际正文说明了具体对象、原始材料与适用边界，不把单篇材料当成普遍结论。',thoughts:'仍需独立材料核对。',questions:[],quotes:[{source_id:source.id,quote:source.excerpt.slice(0,15)}]});assert.equal(saved.verified,true);readbacks.push(saved.memory_id)
+   await engine.call('exploration_progress',{key:'progress-'+r.id,decision_id:d.id,outcome:'completed',source_ids:out.source_ids,answered:'读完实际正文并保留了来源及边界',remaining:'仍缺独立比较',next_step:'寻找独立材料',reason:'完整正文已经过宿主送达确认'});continue
+  }
+  if(out.next_action==='exploration_question'){
+   await engine.call('exploration_question',{key:'question-'+steps,collection_id:out.collection_id,source_ids:out.source_ids,question:'该内容对象的适用边界是什么？',next_step:'找独立材料',reason:'从已读正文留下真实问题'});continue
+  }
+  assert.fail('Unexpected normal continuation '+JSON.stringify(out))
+ }
+ assert.ok(steps<100);assert.equal(out.stop_reason,'reading_limit');assert.equal(out.reading_budget.completed,5);assert.equal(readbacks.length,5)
+ const {readingDomains}=await import('../tools/lib/concept-system/breadth.mjs'),s=store.state().concepts,domains=out.readings.map(r=>readingDomains(s,s.decisions[r.decision_id])[0]);assert.ok(new Set(domains).size>=2)
+ let streak=0,previous;for(const domain of domains){streak=domain===previous?streak+1:1;assert.ok(streak<=2);previous=domain}
+ assert.ok(store.events({type:'resource.candidates_filtered'}).some(e=>e.data.required_domain&&e.data.candidates.some(c=>c.url.endsWith('/wrong')&&!c.eligible)))
+ assert.equal(store.events({type:'exploration.exposed'}).length,5);assert.deepEqual(await next(),out)
+})
+
+test('Bilibili selection enforces the same domain gate and target budget before stance scores can dominate',async t=>{
+ const f=await fixture(t,'deep',5),{store,engine}=f
+ for(const [name,domain] of [['历史记忆','历史与社会'],['语言哲学','哲学与认知']]){
+  const m=await engine.call('concept_propose',{key:'v-'+name,subject:'fish',content:name,tags:['topic'],source:{id:'v-'+name,actor:'third_party',type:'manual',excerpt:name}})
+  await engine.call('concept_review',{key:'v-place-'+name,candidate_id:m.id,status:'accepted',reason:'内容对象',collections:[{name,domain}]})
+ }
+ await engine.call('exploration_configure',{key:'v-ratios',ratios:{deep:.6,revisit:.25,discover:.15},reason:'正常比例'})
+ await store.transaction({},d=>{d.state.concepts.collections[f.group].domain='软件与工程';for(let i=0;i<2;i++)d.state.concepts.decisions['v-history'+i]={id:'v-history'+i,subject:'fish',scene:'watch',at:store.now()-100+i,collection_ids:[f.group],exploration:{path:'deep',domain:'软件与工程',target:{collection_id:f.group},exposure:{at:store.now()-100+i,source_ids:['topic']},progress:{outcome:'completed'}}}})
+ const selector=new FeedConcepts({config,store,runId:'normal-video',seed:'normal-video'}),p=await selector.plan([]),domain=p.exploration.breadth_guard.required_domain
+ assert.ok(domain);assert.notEqual(domain,'软件与工程')
+ await assert.rejects(engine.call('feed_search_plan',{key:'v-search-missing',run_id:'normal-video',source:'bilibili',queries:['软件工程'],reason:'不能忽略领域门禁'}),/required domain/)
+ await engine.call('feed_search_plan',{key:'v-search',run_id:'normal-video',source:'bilibili',domain,queries:[domain+' 真实材料'],reason:'按领域找内容'})
+ const videos=Array.from({length:4},(_,i)=>({bv:'BV123456789'+i,t:i===3?'软件工程测试':domain+'新术语'+i,description:'有原始材料',up:String(i),_score:i===3?999:1}))
+ const args={candidates:videos,legacy:videos,n:5,per:5},packet=await selector.select(args)
+ const assessments=videos.map((v,i)=>({bvid:v.bv,exploration:{relevance:1,domain:i===3?'软件与工程':domain,quote:v.t,reason:'按真实标题判断领域'},stances:packet.stances.map(s=>({collection_id:s.collection_id,member_id:s.member_id,strength:1,quote:v.t,reason:'强烈支持阅读'})),...(p.exploration.path==='discover'?{discovered_term:v.t}:{})}))
+ await engine.call('feed_assess',{key:'v-assess',run_id:'normal-video',assessments})
+ const selected=await selector.resume({n:5,per:5});assert.equal(selected.selected.length,2);assert.ok(selected.selected.every(v=>v.bv!==videos[3].bv))
+ assert.equal(selected.candidate_filter.candidates.find(v=>v.bvid===videos[3].bv).reason,'outside_required_domain')
+ assert.ok(selected.decisions.every(d=>d.exploration.candidate_domain===domain));assert.equal(store.events({type:'exploration.exposed'}).length,0)
+})

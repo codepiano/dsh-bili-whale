@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import {interestEligibility,collectionDomain,questionDomain,breadthSnapshot,readingHistory} from "./breadth.mjs";
+import {interestEligibility,collectionDomain,questionDomain,breadthSnapshot,readingHistory,domainBudget,domainKey} from "./breadth.mjs";
 import { matchesScene } from "./scenes.mjs";
 import { hash } from "./store.mjs";
 
@@ -33,8 +33,8 @@ const decisions = (s, subject, scene) =>
     .filter((d) => d.subject === subject && d.scene === scene && d.exploration)
     .sort((a, b) => b.at - a.at || b.id.localeCompare(a.id));
 const exposed = (d) =>
-  !!d.exploration.exposure ||
-  ["engaged", "completed"].includes(d.exploration.progress?.outcome);
+  !["failed","skipped"].includes(d.exploration.progress?.outcome) && (!!d.exploration.exposure ||
+  ["engaged", "completed"].includes(d.exploration.progress?.outcome));
 const exposedAt = (d) =>
   d.exploration.exposure?.at ?? d.exploration.progress?.at;
 const validGroup = (s, id, subject, scene) => {
@@ -183,8 +183,15 @@ export function explorationPlan(s, input, now) {
       break;
     }
   }
+  const discoveryDomain=breadth.domains.filter(d=>d.domain!=="未分类")[0]?.domain??null;
+  const guard=domainBudget(s,{subject:input.subject,allowed,basePath:path,weights,targets:{deep:open.map(q=>q.domain),revisit:revisit.map(g=>g.domain),discover:discoveryDomain},config:cfg,breadth});
+  path=guard.path;
+  if(guard.required_domain){const rows=path==='deep'?open:path==='revisit'?revisit:null;if(rows){const index=rows.findIndex(row=>row.domain===guard.required_domain);if(index>0)rows.unshift(...rows.splice(index,1))}}
   return {
     algorithm: "exploration-v1",
+    breadth_guard:guard,
+    selected_domain:guard.selected_domain,
+    reading_limit:guard.reading_limit,
     state_version: hash(s),
     subject: input.subject,
     scene: input.scene,
@@ -195,12 +202,12 @@ export function explorationPlan(s, input, now) {
     weights,
     available,
     unavailable: paths.filter((p) => !available[p]),
-    reason: `选择 ${path}：目标比例 ${Math.round(cfg.ratios[path] * 100)}%，最近 ${recent.length} 次实际曝光中占 ${counts[path]} 次，当前欠额 ${weights[path].toFixed(3)}；不可用路径暂时排除，零比例路径不参与`,
+    reason: `选择 ${path}：目标比例 ${Math.round(cfg.ratios[path] * 100)}%，最近 ${recent.length} 次实际曝光中占 ${counts[path]} 次，当前欠额 ${weights[path].toFixed(3)}；不可用路径暂时排除，零比例路径不参与。${guard.reason}`,
     breadth,
     questions: open.slice(0, input.limit),
     revisit: revisit.slice(0, input.limit),
     discovery: {
-      target_domain:breadth.domains.filter(d=>d.domain!=="未分类")[0]?.domain??null,
+      target_domain:discoveryDomain,
       recent_domains:breadth.domains.filter(d=>d.count>0).map(d=>({domain:d.domain,reads:d.count})),
       breadth_rule:"优先 target_domain 的陌生对象或当前图谱之外的领域，不能只在近期热门领域换术语；检索理由说明领域选择，无相关材料如实耗尽",
       adjacent:
@@ -258,6 +265,11 @@ export function validateExploration(s, input, now) {
       if (t.collection_id || t.question_id)
         throw Error("Discovery target must name only a pending candidate");
     }
+    const domainRequired=plan.breadth_guard?.required_domain;
+    if(domainRequired){
+      const actualDomain=x.path==='discover'?o.candidate_domain:x.path==='deep'?questionDomain(s.exploration.questions[t.question_id],s.collections[t.collection_id]):collectionDomain(s.collections[t.collection_id]).name;
+      if(domainKey(actualDomain)!==domainKey(domainRequired))throw Error('Exploration target must match required domain: '+domainRequired);
+    }
     if (
       x.path !== "discover" &&
       !o.contributions.some((c) => c.collection_id === t.collection_id)
@@ -287,6 +299,7 @@ export function mutateExploration(s, name, input, now, emit, links) {
       algorithm: "exploration-v1",
       ratios: input.ratios,
       history_window: input.history_window,
+      ...(input.breadth?{breadth:input.breadth}:state.config?.breadth?{breadth:state.config.breadth}:{}),
     };
     const result = {
       before,

@@ -95,3 +95,45 @@ test('method classification and sourced domain changes survive restart with orig
  s.exploration.config.ratios={deep:0,revisit:1,discover:0};const p=explorationPlan(s,{subject:'fish',scene:'watch',seed:'ordinary',limit:50},now);assert.ok(!p.revisit.some(g=>g.collection_id==='expression'));
  s.collections.history.domain='__proto__';const interests=interestPlan(s,'ordinary',now);assert.ok(interests.breadth.domains.some(d=>d.domain==='__proto__'));assert.equal(Object.prototype.count,undefined);
  })
+
+test('after two actual same-domain reads every unchanged seed routes to an available underread domain, without changing ratios',()=>{
+ const s=fixture();delete s.exploration.questions.history;delete s.exploration.questions.philosophy
+ read(s,'r0','code','deep',200);read(s,'r1','test','deep',100)
+ const ratios=structuredClone(s.exploration.config.ratios)
+ for(let i=0;i<32;i++){
+  const p=explorationPlan(s,{subject:'fish',scene:'watch',seed:'normal-'+i,limit:50},now)
+  assert.notEqual(p.selected_domain,'软件与工程');assert.equal(p.breadth_guard.previous_domain,'软件与工程');assert.equal(p.breadth_guard.consecutive_reads,2)
+  assert.equal(p.breadth_guard.required_domain,p.selected_domain);assert.ok(['revisit','discover'].includes(p.path));assert.deepEqual(p.config.ratios,ratios)
+  assert.deepEqual(explorationPlan(s,{subject:'fish',scene:'watch',seed:'normal-'+i,limit:50},now),p)
+ }
+})
+test('domain guard honors disabled paths, excludes failed/skipped reads, preserves cold start and has auditable configuration',()=>{
+ const s=fixture();delete s.exploration.questions.history;delete s.exploration.questions.philosophy
+ read(s,'r0','code','deep',200);read(s,'r1','code','deep',100)
+ s.exploration.config.ratios={deep:1,revisit:0,discover:0}
+ let p=explorationPlan(s,{subject:'fish',scene:'watch',seed:'normal',limit:50},now);assert.equal(p.path,'deep');assert.equal(p.breadth_guard.required_domain,null)
+ s.exploration.config.ratios={deep:.6,revisit:.25,discover:.15};s.decisions.r1.exploration.progress.outcome='failed'
+ p=explorationPlan(s,{subject:'fish',scene:'watch',seed:'normal',limit:50},now);assert.equal(p.breadth_guard.consecutive_reads,1)
+ s.decisions.r0.exploration.progress.outcome='skipped';p=explorationPlan(s,{subject:'fish',scene:'watch',seed:'normal',limit:50},now);assert.equal(p.breadth_guard.consecutive_reads,0)
+ s.exploration.config.breadth={enabled:false,max_consecutive_domain_reads:1,max_readings_per_target:1};p=explorationPlan(s,{subject:'fish',scene:'watch',seed:'normal',limit:50},now);assert.equal(p.reading_limit,null);assert.equal(p.breadth_guard.required_domain,null)
+})
+test('a one-reading remainder cannot overshoot the domain streak; compact normal packets retain the domain constraint',()=>{
+ const s=fixture();delete s.exploration.questions.history;delete s.exploration.questions.philosophy
+ read(s,'r0','code','deep',100)
+ for(let i=0;i<16;i++){
+  const p=explorationPlan(s,{subject:'fish',scene:'watch',seed:'sequence-'+i,limit:50},now)
+  if(p.selected_domain==='软件与工程')assert.equal(p.reading_limit,1)
+  const out=compactFeed({status:'search_plan_required',run_id:'normal',exploration:p})
+  assert.deepEqual(out.exploration.breadth_guard,p.breadth_guard);assert.equal(out.exploration.reading_limit,p.reading_limit)
+ }
+})
+
+ test('configured one-read domain limit cannot preselect two readings in a new domain',()=>{
+ const s=fixture();delete s.exploration.questions.history;delete s.exploration.questions.philosophy;read(s,'only','code');s.exploration.config.breadth={enabled:true,max_consecutive_domain_reads:1,max_readings_per_target:3};
+ const p=explorationPlan(s,{subject:'fish',scene:'watch',seed:'unchanged',limit:50},now);assert.notEqual(p.selected_domain,'软件与工程');assert.equal(p.reading_limit,1);
+ })
+
+ test('domain budget searches other targets within an enabled path instead of mistaking its unknown first group for no alternative',()=>{
+ const s=fixture();read(s,'r0','code','deep',200);read(s,'r1','code','deep',100);s.members.aaa={...s.members.history,id:'aaa',source_id:'aaa'};s.sources.aaa={...s.sources.history,id:'aaa',ref:'aaa'};s.collections.aaa={...s.collections.history,id:'aaa',members:['aaa'],domain:'未分类'};s.exploration.config.ratios={deep:0,revisit:1,discover:0};
+ const p=explorationPlan(s,{subject:'fish',scene:'watch',seed:'normal',limit:50},now);assert.equal(p.path,'revisit');assert.equal(p.breadth_guard.required_domain,p.revisit[0].domain);assert.notEqual(p.revisit[0].domain,'未分类');assert.notEqual(p.revisit[0].domain,'软件与工程');
+ })

@@ -87,6 +87,7 @@ export const schemas = {
       run_id: id,
       queries: z.array(z.string().trim().min(2).max(40)).min(1).max(4),
       source:z.enum(['bilibili','web','both']).optional(),
+      domain:z.string().trim().min(1).max(80).optional(),
       reason: text,
     })
     .strict(),
@@ -101,6 +102,7 @@ export const schemas = {
               bvid: z.string().regex(/^BV[0-9A-Za-z]{10}$/),
               exploration: z
                 .object({
+                  domain:z.string().trim().min(1).max(80).optional().describe("领域门禁启用时，按候选标题/摘要判断所属领域；不确定填未分类，不为通过门禁改标签"),
                   relevance: unit.describe('对当前探索目标的相关度：无关/同名词碰巧命中为0，弱关联低于0.5不入选，0.5至1为有材料支持的相关候选。'),
                   reason: text,
                   quote: z.string().min(1).max(500),
@@ -131,6 +133,7 @@ export const schemas = {
       key,
       ...links,
       ratios: explorationRatios,
+      breadth:z.object({enabled:z.boolean().default(true),max_consecutive_domain_reads:z.number().int().min(1).max(20).default(2),max_readings_per_target:z.number().int().min(1).max(20).default(2)}).strict().optional(),
       history_window: z.number().int().min(10).max(500).default(40),
       reason: text,
     })
@@ -273,6 +276,7 @@ export const schemas = {
               label: z.string().trim().min(1).max(200),
               eligible: z.boolean().default(true),
               target: target.optional(),
+              candidate_domain:z.string().trim().min(1).max(80).optional(),
               reason: text,
               contributions: z
                 .array(

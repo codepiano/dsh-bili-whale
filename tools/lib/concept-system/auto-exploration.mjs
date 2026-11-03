@@ -3,6 +3,7 @@ import {readingBudget,recordCompletedRead,settleExplorationCycle} from './explor
 import {compactFeed} from './feed-presentation.mjs'
 import {config} from '../config.mjs'
 import {hash} from './store.mjs'
+import {requiredDomain} from './breadth.mjs'
 import {VideoReads,isVideoTextKind} from './video-reads.mjs'
 import {runFeed} from './operations.mjs'
 
@@ -55,7 +56,7 @@ export async function nextExploration(store,{cycle_id},{signal,feed=runFeed,read
   const envelope={cycle_id,run_id,round:cycle.round,max_rounds:cycle.max_rounds,feed_arguments:args,reading_budget:readingBudget(cycle),continue_with:{tool:'exploration_next',arguments:{cycle_id}}}
   if(slate.status==='search_plan_required'||slate.status==='judgment_required') {
     const next_action=slate.status==='search_plan_required'?'feed_search_plan':'feed_assess'
-    let packet=compactFeed(slate),required_arguments={run_id,key:run_id+':search',...(cfgNow.night?.searchSource?{source:cfgNow.night.searchSource}:{})};
+    let packet=compactFeed(slate),required_arguments={run_id,key:run_id+':search',...(requiredDomain(slate.exploration)?{domain:requiredDomain(slate.exploration)}:{}),...(cfgNow.night?.searchSource?{source:cfgNow.night.searchSource}:{})};
     if(next_action==='feed_assess') {
       const assessed=store.state().feed_judgments?.[run_id]?.candidate_assessments??{},candidate=slate.candidates.find(v=>!assessed[v.bv]);
       packet={...packet,candidates:candidate?[candidate]:[],assessment_progress:{assessed:Object.keys(assessed).length,total:slate.candidates.length}};

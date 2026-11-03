@@ -415,3 +415,11 @@ test("configured exploration participates in budgeted learning context without c
   });
   assert.doesNotMatch(expression.text, /exploration_plan/);
 });
+
+ test('domain reading budget is configurable, versioned and preserved when only ratios are updated',async t=>{
+ const {engine,store,root}=box(t);const breadth={enabled:true,max_consecutive_domain_reads:1,max_readings_per_target:3};
+ await engine.call('exploration_configure',{key:key(),ratios:{deep:.6,revisit:.25,discover:.15},breadth,reason:'明确设置领域阅读预算'});
+ await configure(engine,{deep:.6,revisit:.25,discover:.15});const fresh=new ConceptEngine(new ObservationStore(root));
+ assert.deepEqual((await fresh.call('exploration_query',{})).config.breadth,breadth);assert.equal(store.events({type:'exploration.configured'}).at(-1).data.after.breadth.max_consecutive_domain_reads,1);
+ await assert.rejects(engine.call('exploration_configure',{key:key(),ratios:{deep:.6,revisit:.25,discover:.15},breadth:{...breadth,max_readings_per_target:0},reason:'非法预算'}));
+ })

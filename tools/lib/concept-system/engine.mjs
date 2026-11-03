@@ -121,7 +121,7 @@ export function scoreDecision(state, input, now) {
       : 0;
     rows.push({
       label: option.label,
-      ...(exploration ? { target: option.target ?? null } : {}),
+      ...(exploration ? { target: option.target ?? null,...(option.candidate_domain?{candidate_domain:option.candidate_domain}:{}) } : {}),
       eligible: option.eligible,
       reason: option.reason,
       contributions,
@@ -211,6 +211,9 @@ export function commitScoredDecision(state, preview, input, now) {
             available: preview.exploration.available,
             planner_reason: preview.exploration.planner_reason,
             breadth:preview.exploration.breadth,
+            breadth_guard:preview.exploration.breadth_guard,
+            candidate_domain:row.candidate_domain??null,
+            candidate_domain_scope:row.candidate_domain?"model_judgment_from_candidate_metadata":null,
             planned_domain:preview.exploration.path==='discover'?preview.exploration.discovery.target_domain:preview.exploration.questions.find(q=>q.id===row.target.question_id)?.domain??preview.exploration.revisit.find(g=>g.collection_id===row.target.collection_id)?.domain,
             reason: preview.exploration.reason,
             target: row.target,

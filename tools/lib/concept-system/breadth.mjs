@@ -23,7 +23,7 @@ export function readingDomain(state,decision) {
   return x?.target?.question_id?questionDomain(state.exploration?.questions?.[x.target.question_id]??x.target_snapshot,c):collectionDomain(c).name;
 }
 export function readingHistory(state,subject='fish') {
-  return Object.values(state.decisions??{}).filter(d=>d.subject===subject&&d.exploration?.exposure&&d.exploration.progress?.outcome!=='failed').sort((a,b)=>b.exploration.exposure.at-a.exploration.exposure.at||a.id.localeCompare(b.id));
+  return Object.values(state.decisions??{}).filter(d=>d.subject===subject&&d.exploration?.exposure&&!['failed','skipped'].includes(d.exploration.progress?.outcome)).sort((a,b)=>b.exploration.exposure.at-a.exploration.exposure.at||a.id.localeCompare(b.id));
 }
 export function readingDomains(state,decision) {
   const x=decision.exploration;
@@ -49,4 +49,33 @@ export function readingPenalty(state,c,now) {
 export function readingFatigue(c,scene,now,p) {
   const scenes=['feed','watch'].includes(scene)?['feed','watch']: [scene];
   return Math.max(0,...scenes.map(key=>{const f=c.fatigue?.[key];return f?f.value*2**(-Math.max(0,now-f.at)/p.fatigueHalfLifeMs):0}));
+}
+
+export const DOMAIN_BUDGET_DEFAULTS=Object.freeze({enabled:true,max_consecutive_domain_reads:2,max_readings_per_target:2})
+export const domainKey=s=>String(s??'').normalize('NFKC').trim().toLowerCase()
+export const requiredDomain=route=>route?.breadth_guard?.required_domain??null
+export function checkCandidateDomain(route,assessment) {
+  const required=requiredDomain(route)
+  if(required&&assessment.exploration.relevance>=0.5&&!assessment.exploration.domain)throw Error('Domain guard requires exploration.domain from candidate title/summary; use 未分类 if uncertain')
+  return !required||domainKey(assessment.exploration.domain)===domainKey(required)
+}
+export function domainBudget(state,{subject,allowed,basePath,weights,targets,config,breadth}) {
+  const limits={...DOMAIN_BUDGET_DEFAULTS,...config.breadth},history=readingHistory(state,subject)
+  const latest=history[0],lastDomains=latest?readingDomains(state,latest):[]
+  const domain=lastDomains.length===1&&lastDomains[0]!=='未分类'?lastDomains[0]:null
+  let streak=0
+  if(domain)for(const d of history){if(!readingDomains(state,d).includes(domain))break;streak++}
+  const count=name=>breadth.domains.find(d=>d.domain===name)?.count??0
+  const reached=limits.enabled&&domain!==null&&streak>=limits.max_consecutive_domain_reads
+  const list=path=>Array.isArray(targets[path])?targets[path]:[targets[path]]
+  const outside=name=>name&&name!=='未分类'&&name!==domain&&count(name)<=count(domain)
+  const target=path=>reached?(list(path).find(outside)??list(path)[0]):list(path)[0]
+  const alternatives=allowed.filter(path=>outside(target(path)))
+  const constrained=limits.enabled&&domain!==null&&streak>=limits.max_consecutive_domain_reads&&alternatives.length>0
+  let path=basePath
+  if(constrained&&!alternatives.includes(path))path=[...alternatives].sort((a,b)=>(weights[b]??0)-(weights[a]??0)||config.ratios[b]-config.ratios[a]||a.localeCompare(b))[0]
+  const selected=target(path)??null
+  const availableOther=domain&&alternatives.length>0
+  const room=availableOther&&selected===domain?Math.max(1,limits.max_consecutive_domain_reads-streak):limits.max_readings_per_target
+  return {policy:'reading-domain-budget-v1',limits,base_path:basePath,base_domain:list(basePath)[0]??null,path,selected_domain:selected,target_overridden:selected!==list(path)[0],previous_domain:domain,consecutive_reads:streak,required_domain:constrained?selected:null,overridden:path!==basePath,reading_limit:limits.enabled?Math.min(limits.max_readings_per_target,limits.max_consecutive_domain_reads,room):null,reason:!limits.enabled?'领域阅读预算已关闭':constrained?`最近连续${streak}次实际阅读属于${domain}；本轮转向${selected}，保留原种子和比例，候选必须按原文判断领域`:'沿原比例选择；单目标阅读预算用完后重新规划，不以兴趣词展示冒充跨领域阅读'}
 }

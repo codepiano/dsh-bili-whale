@@ -1,6 +1,6 @@
 // Business responses carry the current task; archived packets retain the audit.
 const pick = (value, keys) => Object.fromEntries(keys.filter(k => value?.[k] !== undefined).map(k => [k, value[k]]));
-const routeKeys = ['algorithm', 'state_version', 'seed', 'path', 'reason', 'target'];
+const routeKeys = ['algorithm', 'state_version', 'seed', 'path', 'reason', 'target', 'breadth_guard', 'selected_domain', 'reading_limit'];
 const questionKeys = ['id', 'question', 'remaining', 'next_step', 'source_ids', 'status'];
 export const detailSections = ['interest_competition', 'member_competitions', 'questions', 'revisit', 'target_members', 'stances', 'candidates'];
 

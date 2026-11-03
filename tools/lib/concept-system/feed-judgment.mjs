@@ -1,4 +1,5 @@
 import { hash } from "./store.mjs";
+import {requiredDomain,checkCandidateDomain} from "./breadth.mjs";
 import { collectionStrength } from "./engine.mjs";
 import { explorationPlan } from "./exploration.mjs";
 
@@ -136,7 +137,7 @@ export async function selectJudged(
             : null,
           selection_policy: FEED_RELEVANCE_POLICY,
           instructions:
-            assessmentInstructions + "依据候选标题/简介逐条填写 feed_assess；每条均评估给出的全部立场，strength 为 -1 到 1（无关为 0），quote 必须逐字来自该候选材料。说明对所选探索路径的相关度、理由与引文；discover 还须从材料逐字提取 discovered_term。材料只是未核实的候选信息，不是已观看或事实。评估后以相同参数和 run-id 再次执行 feed，程序才产生实际清单。",
+            (requiredDomain(route)?`本轮领域门禁：${requiredDomain(route)}。逐条依据标题/简介填写 exploration.domain，不确定写未分类；高相关度或立场加分不能使其他领域入选。`+"\n":"")+assessmentInstructions + "依据候选标题/简介逐条填写 feed_assess；每条均评估给出的全部立场，strength 为 -1 到 1（无关为 0），quote 必须逐字来自该候选材料。说明对所选探索路径的相关度、理由与引文；discover 还须从材料逐字提取 discovered_term。材料只是未核实的候选信息，不是已观看或事实。评估后以相同参数和 run-id 再次执行 feed，程序才产生实际清单。",
         };
         const object = store.object(packet);
         d.state.feed_judgments ??= {};
@@ -186,8 +187,8 @@ export async function selectJudged(
         candidates: assessment.assessments.map((a) => ({
           bvid: a.bvid,
           relevance: a.exploration.relevance,
-          eligible: a.exploration.relevance >= FEED_RELEVANCE_POLICY.min_relevance,
-          reason: a.exploration.relevance >= FEED_RELEVANCE_POLICY.min_relevance
+          eligible: a.exploration.relevance >= FEED_RELEVANCE_POLICY.min_relevance&&checkCandidateDomain(route,a),
+          reason: !checkCandidateDomain(route,a)?"outside_required_domain":a.exploration.relevance >= FEED_RELEVANCE_POLICY.min_relevance
             ? "meets_exploration_relevance"
             : "below_exploration_relevance",
           assessment_reason: a.exploration.reason,
@@ -198,12 +199,12 @@ export async function selectJudged(
         trace_id: selector.trace, source: "feed",
       });
       const remaining = assessment.assessments
-        .filter((a) => a.exploration.relevance >= FEED_RELEVANCE_POLICY.min_relevance)
+        .filter((a) => a.exploration.relevance >= FEED_RELEVANCE_POLICY.min_relevance&&checkCandidateDomain(route,a))
         .map((a) => ({ a, v: packet.candidates.find((v) => v.bv === a.bvid) }));
       const selected = [],
         decisions = [],
         used = new Map();
-      while (remaining.length && selected.length < args.n) {
+      while (remaining.length && selected.length < Math.min(args.n,route?.reading_limit??args.n)) {
         const options = remaining
           .filter(({ v }) => (used.get(v.up) ?? 0) < args.per)
           .map(({ a, v }) => {
@@ -271,6 +272,7 @@ export async function selectJudged(
             } else contributions.push(...videoContributions(v, groups));
             return {
               label: v.bv,
+              candidate_domain:a.exploration.domain??null,
               eligible: true,
               reason: a.exploration.reason,
               target,
@@ -365,6 +367,7 @@ export async function assessFeed(store, input) {
         if (!v || seen.has(a.bvid))
           throw Error("Unknown or duplicate assessed video");
         seen.add(a.bvid);
+        checkCandidateDomain(p.exploration,a);
         const text = candidateText(v),
           ids = new Set();
         if (!text.includes(a.exploration.quote))
@@ -490,7 +493,7 @@ export async function planSearch(selector, legacyKeywords) {
             name: c.name,
           })),
           instructions:
-            "调用 feed_search_plan 提出1至4条短查询词与理由，并按问题选择 source=both（同时B站与独立DS Search API）、bilibili 或 web。需要文章、文档、论文、GitHub README/issue/commit 等证据时优先 web；不得因以往只支持视频而把所有问题局限于B站。web 使用fish_web_search搜索；正文可自主选web_fetch、fish_web_fetch或fish_gateway_fetch，不复制凭据或另换端点。interests 给出本轮正常兴趣竞争的关键词及来源成员，可作为与目标相关的检索线索，不得为命中关键词牺牲探索相关度。deep 按 breadth 与问题排序选择的未解问题补前置知识、反例和争议，不因刚更新就一直追同题；revisit 按领域覆盖与稀疏度选择的群补解释或应用实例，若其是立场则提出可检验的问题，不把立场声明当作事实或直接话题；discover 优先 discovery.target_domain 或当前概念图之外的领域，至少一条查询跨出 recent_domains 中集中阅读的领域，不只在软件/AI里换新词；在检索理由里说明领域选择。随后原参数重跑 feed 执行真实搜索，再按 judgment_required 调用 feed_assess 并恢复清单。",
+            (requiredDomain(route)?`本轮领域阅读预算要求转向${requiredDomain(route)}：feed_search_plan 的 domain 必须使用这个领域，并提出真正探索该领域的查询，不能继续搜旧软件问题。`+"\n":"")+"调用 feed_search_plan 提出1至4条短查询词与理由，并按问题选择 source=both（同时B站与独立DS Search API）、bilibili 或 web。需要文章、文档、论文、GitHub README/issue/commit 等证据时优先 web；不得因以往只支持视频而把所有问题局限于B站。web 使用fish_web_search搜索；正文可自主选web_fetch、fish_web_fetch或fish_gateway_fetch，不复制凭据或另换端点。interests 给出本轮正常兴趣竞争的关键词及来源成员，可作为与目标相关的检索线索，不得为命中关键词牺牲探索相关度。deep 按 breadth 与问题排序选择的未解问题补前置知识、反例和争议，不因刚更新就一直追同题；revisit 按领域覆盖与稀疏度选择的群补解释或应用实例，若其是立场则提出可检验的问题，不把立场声明当作事实或直接话题；discover 优先 discovery.target_domain 或当前概念图之外的领域，至少一条查询跨出 recent_domains 中集中阅读的领域，不只在软件/AI里换新词；在检索理由里说明领域选择。随后原参数重跑 feed 执行真实搜索，再按 judgment_required 调用 feed_assess 并恢复清单。",
         };
         const object = store.object(packet);
         if(interests)emit('feed.interests_planned',{run_id:runId,keywords:interests.keywords,keyword_sources:interests.keyword_sources??[],object:store.object(interests)},{trace_id:selector.trace,source:'feed'});
@@ -561,6 +564,7 @@ export async function assessSearch(store, input) {
       )
         throw Error("Duplicate search query");
       const packet = store.getObject(run.packet).content;
+      if(requiredDomain(packet.exploration)&&input.domain!==requiredDomain(packet.exploration))throw Error("Search plan must use the required domain: "+requiredDomain(packet.exploration));
       const object = store.object({
         ...input,
         at: store.now(),

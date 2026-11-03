@@ -1,4 +1,4 @@
-import { readingDomain } from './breadth.mjs';
+import { readingDomain,requiredDomain,checkCandidateDomain } from './breadth.mjs';
 import {readingBudget,recordCompletedRead,settleExplorationCycle} from './exploration-budget.mjs'
 import {VideoReads,isVideoTextKind} from './video-reads.mjs'
 import crypto from 'node:crypto'
@@ -31,7 +31,7 @@ export class WebExploration {
     if(run.phase==='search_failed'||run.phase==='empty')return {...base,status:'round_exhausted',reason:run.error??'本轮没有相关且可读取的候选'}
     if(run.phase==='judgment') {
       const candidate=run.candidates.find(c=>!run.assessments[c.url])
-      if(candidate)return {...base,status:'resource_judgment_required',next_action:'resource_assess',required_arguments:{run_id,key:run_id+':'+hash(candidate.url).slice(0,16)},packet:{...compactFeed(full),status:'resource_judgment_required',candidates:[candidate],selection_policy:FEED_RELEVANCE_POLICY,candidate_pool:run.candidate_pool,assessment_progress:{assessed:Object.keys(run.assessments).length,total:run.candidates.length},instructions:'只评当前URL，完整覆盖全部立场，引文来自实际标题/摘要。相关度低于0.5不选，strength是选择阅读的支持方向，无关填0。程序统一比较B站视频与网页候选，不因来源而抬分。搜索摘要不等于正文读完；discover必须提取真实陌生术语。'}}
+      if(candidate)return {...base,status:'resource_judgment_required',next_action:'resource_assess',required_arguments:{run_id,key:run_id+':'+hash(candidate.url).slice(0,16)},packet:{...compactFeed(full),status:'resource_judgment_required',candidates:[candidate],selection_policy:FEED_RELEVANCE_POLICY,candidate_pool:run.candidate_pool,assessment_progress:{assessed:Object.keys(run.assessments).length,total:run.candidates.length},instructions:(requiredDomain(full.exploration)?`领域门禁：${requiredDomain(full.exploration)}；依据候选标题/摘要填写exploration.domain，不确定写未分类，不能为入选更改标签。`:'')+'只评当前URL，完整覆盖全部立场，引文来自实际标题/摘要。相关度低于0.5不选，strength是选择阅读的支持方向，无关填0。程序统一比较B站视频与网页候选，不因来源而抬分。搜索摘要不等于正文读完；discover必须提取真实陌生术语。'}}
       await this.select(run_id,full,{...cycle,n:args.n})
       return this.next(cycle,args)
     }
@@ -85,6 +85,7 @@ export class WebExploration {
       if(search.state_version!==hash(d.state.concepts))throw Error('Resource plan state changed; return to exploration_next')
       const packet=this.store.getObject(search.packet).content,candidate=run.candidates.find(c=>!run.assessments[c.url])
       if(!candidate||resourceUrl(input.url)!==candidate.url)throw Error('Assess the current archived candidate only')
+      checkCandidateDomain(packet.exploration,input)
       const text=excerpt(candidate)
       if(!text.includes(input.exploration.quote))throw Error('Resource relevance quote must be verbatim')
       const seen=new Set()
@@ -102,7 +103,8 @@ export class WebExploration {
     return store.transaction({key:'resource-select:'+run_id,input:{run_id}},(d,emit)=>{
       const run=d.state.web_runs[run_id],s=d.state.concepts,route=packet.exploration
       if(d.state.feed_searches[run_id].state_version!==hash(s))throw Error('Resource plan state changed; return to exploration_next')
-      const relevant=run.candidates.filter(c=>run.assessments[c.url]?.exploration.relevance>=FEED_RELEVANCE_POLICY.min_relevance)
+      const relevant=run.candidates.filter(c=>run.assessments[c.url]?.exploration.relevance>=FEED_RELEVANCE_POLICY.min_relevance&&checkCandidateDomain(route,run.assessments[c.url]))
+      emit('resource.candidates_filtered',{run_id,required_domain:requiredDomain(route),reading_limit:route.reading_limit??null,candidates:run.candidates.map(c=>({url:c.url,domain:run.assessments[c.url]?.exploration.domain??null,eligible:relevant.some(v=>v.url===c.url)}))},{session_id:run.session_id})
       if(!relevant.length){run.phase='empty';return {selected:[]}}
       const options=relevant.map(c=>{
         const a=run.assessments[c.url];let target=route.target
@@ -119,11 +121,11 @@ export class WebExploration {
           if(!member)throw Error('Target has no eligible contribution member')
           contributions.push({collection_id:target.collection_id,member_id:member.id,relevance:a.exploration.relevance,strength:1,purpose:'exploration',reason:a.exploration.reason})
         }
-        return {label:c.url,eligible:true,reason:a.exploration.reason,target,contributions}
+        return {label:c.url,eligible:true,reason:a.exploration.reason,target,contributions,candidate_domain:a.exploration.domain??null}
       })
       let remaining=options
       run.selected=[]
-      while(remaining.length&&run.selected.length<Math.min(cycle.n??1,relevant.length)) {
+      while(remaining.length&&run.selected.length<Math.min(cycle.n??1,relevant.length,route.reading_limit??cycle.n??1)) {
         const input={question:'选择有助于当前问题的网页正文',scene:'watch',subject:'fish',seed:run_id+':web:'+run.selected.length,trace_id:'resource-'+hash(run_id).slice(0,32),options:remaining,exploration:{path:route.path,seed:route.seed,state_version:hash(s),reason:'按真实网页候选和立场判断选择'},feed_judgment:{run_id,read_policy:'resource-page-v1',relevance_policy:FEED_RELEVANCE_POLICY}}
         const scored=scoreDecision(s,input,store.now());input.feed_judgment.read_policy=run.candidates.find(c=>c.url===scored.winner).kind==='video'?'subtitle-pages-v1':'resource-page-v1';const object=store.object(scored),state_object=store.object(s),preview_id=crypto.randomUUID()
         d.savePreview(preview_id,{object:object.hash,state_object:state_object.hash,committed:null});emit('decision.previewed',{id:preview_id,object,state_object,winner:scored.winner,state_version:scored.state_version},{trace_id:input.trace_id,source:'web'})
