@@ -35,7 +35,7 @@ description: 鱼在实际读完视频字幕、转写或网页正文后，将内�
 
 ## 什么时候算读完
 
-视频沿 `exploration_next` 返回的权威续步走完 `debrief_read`、全部 `video_read_page` 及真实正文送达；网页沿 `fish_web_search`、`resource_assess`、`fish_web_fetch` 的正常续步与宿主原文送达回执确认阅读，重启恢复时按 `resource_read_page` 重交已归档正文。无字幕时继续查原音频转写状态或找替代材料；转写受理、简介、封面、评论、正文部分页或截断不能冒充完整阅读。取得材料、实际阅读、概念评估是不同阶段，按回执报告。
+视频沿 `exploration_next` 返回的权威续步走完 `debrief_read`、全部 `video_read_page` 及真实正文送达；网页沿 `fish_web_search`、`resource_assess`、`web_fetch`、`fish_web_fetch`、`fish_gateway_fetch` 中自主选择的正常续步与宿主原文送达回执确认阅读，重启恢复时按 `resource_read_page` 重交已归档正文。无字幕时继续查原音频转写状态或找替代材料；转写受理、简介、封面、评论、正文部分页或截断不能冒充完整阅读。取得材料、实际阅读、概念评估是不同阶段，按回执报告。
 
 只对实际交付并读完的正文作阅读判断；简介降级来源只可作待查线索，不写成已读总结。不要自行增加曝光、奖励或问题进展来证明维护完成。
 
@@ -84,3 +84,5 @@ description: 鱼在实际读完视频字幕、转写或网页正文后，将内�
 第三方视频的具体对象名称或抽象概念均可作为接触到的 topic/表达（mention），不直接接受为 belief/motive、喜欢或事实核验。引用、否定、不确定分别保留解释状态。你的经历和主人的偏好不能互换，单一视频多个分段也不是多个独立证据。
 
 主会话发生写入后用查询读回核对实际群/成员/来源和理由；失败或待评估就如实报告。概念写入以 concept_propose/concept_review 的实际回执及查询结果为准，不把观察事件当成概念已写入。允许“评估完成，无新增”；不伪造阅读、维护、问题进展或 persona 修改。
+
+正文工具由鱼自主选择：DSH原生`web_fetch`、独立DS Fetch API的`fish_web_fetch`、我们Web Fetch的`fish_gateway_fetch`（jina/opencli/deepseek）。可用`fish_fetch_backends`查看当前配置，状态机的next_action仅提供兼容默认，不限制选择。抓取失败时可换工具/后端重试同URL后再续步，无需另起cycle。已有完整归档先逐页读，避免重复抓取；后端返回的预览/截断/完整性提示必须如实保留。原生工具未证明具体子provider时只标记dsh-native，不冒充DS API。

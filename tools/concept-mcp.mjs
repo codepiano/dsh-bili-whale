@@ -8,8 +8,8 @@ import { redact } from "./lib/concept-system/store.mjs";
 const engine = new ConceptEngine(),
   server = new McpServer({ name: "bili-whale-concepts", version: "0.1.0" });
 const descriptions = {
-  resource_retry:'仅在明确要求重试旧链接时使用；run_id和url必须对应原来已选的归档网页。用新key创建独立单条重试cycle，相同key幂等恢复。保留原决策、旧回执与关联，不重置自动cycle，不搜索或抬分。随后用exploration_next正常完成固定DS Fetch和逐页阅读。',
-  resource_unavailable:'仅在鱼专用fish_web_search及fish_web_fetch（固定DS Fetch）未注册或无法执行时报告原因，标为调用者报告而非提供方实际故障。不产生阅读或曝光，继续正常预算。',
+  resource_retry:'仅在明确要求重试旧链接时使用；run_id和url必须对应原来已选的归档网页。用新key创建独立单条重试cycle，相同key幂等恢复。保留原决策、旧回执与关联，不重置自动cycle，不搜索或抬分。随后用exploration_next自主选择正文工具并完成逐页阅读。',
+  resource_unavailable:'仅在鱼专用fish_web_search及自行选择web_fetch/fish_web_fetch/fish_gateway_fetch未注册或无法执行时报告原因，标为调用者报告而非提供方实际故障。不产生阅读或曝光，继续正常预算。',
   resource_assess:'评估联合搜索实际返回的当前视频或网页候选；按URL匹配完整立场，原文引述标题/摘要，相关度低于0.5不选。仅记录选题判断，不接受调用者提交网页正文或冒充已读。',
   resource_read_page:'按实际read_id重读已交付网页的一页正文。来源含URL、版本和页数；不代表整个站点或仓库。',
   resource_knowledge_save:'将完整交付的网页、仓库页面或文章的总结和想法保存到Mem并读回验证；使用真实read_id与原文引文，不接受搜索摘要作为已读正文。',
@@ -30,7 +30,7 @@ const descriptions = {
   feed_run: "执行真实只读平台检索与选片流程，固定参数由插件服务运行，不需要会话终端写入学习目录。按 search_plan_required / judgment_required 完成规划和判断后，重复相同参数恢复同一 run-id。不会评论、收藏或发送。",
   debrief_read: "字幕优先读取已选视频并返回物料回执；缺字幕时调用 common-mcp speech HTTP 服务云端转写，不使用本地模型。audio=always 用于核实口述，never 禁用转写；context=true 才补封面/弹幕/热评。画面另用 video_read_frames；无任意命令或路径参数。",
   feed_search_plan:
-    "为 feed 的 search_plan_required 阶段提出符合探索路径的查询词与理由，并选择source=both（默认双来源）、bilibili或web；文章、文档、论文、仓库README/issue/commit用web，状态机随后要求鱼专用fish_web_search及fish_web_fetch（固定DS Fetch）；不修改概念标签。随后恢复原 run-id 真实检索。",
+    "为 feed 的 search_plan_required 阶段提出符合探索路径的查询词与理由，并选择source=both（默认双来源）、bilibili或web；文章、文档、论文、仓库README/issue/commit用web，状态机随后要求鱼专用fish_web_search及自行选择web_fetch/fish_web_fetch/fish_gateway_fetch；不修改概念标签。随后恢复原 run-id 真实检索。",
   feed_assess:
     "评估 feed 当前返回的候选；自动 cycle 每次一个候选，完整覆盖全部立场，逐字引用候选原文。探索相关度低于0.5不入选，同名词误命中给0。立场strength表示对选择阅读的支持：读为正、跳过为负、无关为0。清单允许不足或为空。只记录判断，不伪造观看；使用回执的exploration_next续接。",
   exploration_configure:

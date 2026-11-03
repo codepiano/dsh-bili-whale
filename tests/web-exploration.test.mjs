@@ -289,14 +289,22 @@ test('fixed fetch metadata is not a reading, archived long bodies page completel
   await assert.rejects(f.engine.call('resource_retry',{...input,key:'invented-url',url:'https://example.org/unselected'}),/originally selected/);
 });
 
-test('legacy global fetch and a spoofed provider cannot become the new reading evidence',async t=>{
+test('native fetch is admitted; failed attempts allow a model-selected gateway backend without losing history',async t=>{
  const f=await fixture(t);await f.searchAndSelect();
- await f.web.observe({name:'web_fetch',arguments:{url},callId:'legacy',agent:{session:{id:'fish'}}},{value:{url,body:{content:'legacy'}},meta:{url,statusCode:200,truncated:false},content:[{type:'text',text:'legacy'}]});
- assert.equal(Object.keys(f.store.state().resource_reads??{}).length,0);
- await assert.rejects(f.native('web_fetch',{url},{provider:'http',url,body:{content:'other provider'}},{url,statusCode:200,truncated:false}),/provider identity mismatch/);
- assert.equal(Object.keys(f.store.state().resource_reads??{}).length,0);
+ await f.web.observe({name:'web_fetch',arguments:{url},callId:'native-failed',agent:{session:{id:'fish'}}},{value:{url,statusCode:403,body:{content:'Forbidden'}},meta:{url,statusCode:403,truncated:false},content:[{type:'text',text:'Forbidden'}]});
+ const failed=Object.values(f.store.state().resource_reads)[0];assert.equal(failed.status,'failed');assert.equal(failed.fetch_receipt.provider,'dsh-native');
+ await assert.rejects(f.native('fish_gateway_fetch',{url,backend:'jina'},{provider:'common-mcp:deepseek',url,body:{content:'wrong backend'}},{url,statusCode:200,truncated:false}),/provider identity mismatch/);
+ await f.native('fish_gateway_fetch',{url,backend:'jina'},{provider:'common-mcp:jina',provider_attempted:true,url,body:{content:'真实返工记录，改用Jina取得正文。'},warnings:['Source completeness unverified']},{url,statusCode:200,truncated:false});await f.acknowledge();
+ let out=await f.next();assert.equal(out.status,'resource_body_required');const read=f.store.state().resource_reads[out.arguments.read_id];assert.equal(read.fetch_receipt.provider,'common-mcp:jina');assert.equal(read.reading_complete,false);assert.ok(out.fetch_choices.some(c=>c.tool==='web_fetch'));
+ await f.host.onEvent({id:'fish'},{seq:200,type:'tool/result',data:{message:{source:{kind:'tool'},content:[{type:'text',text:JSON.stringify(f.web.page({read_id:read.id,page:1}))}]}}});await f.host.onEvent({id:'fish'},{seq:201,type:'session-log-deepseek/delivery-accepted',data:{sessionId:'fish',throughSeq:200}});
+ out=await f.next();assert.equal(out.status,'progress_required');assert.equal(Object.values(f.store.state().resource_reads).length,2);assert.equal(f.store.state().resource_reads[failed.id].status,'failed');
 });
-
+test('DSH native rendered body retains its own full delivery proof without pretending to identify a subprovider',async t=>{
+ const f=await fixture(t);await f.searchAndSelect();const text='Native converted page content about actual upgrade costs.';
+ await f.web.observe({name:'web_fetch',arguments:{url},callId:'native-ok',agent:{session:{id:'fish'}}},{value:{url,statusCode:200,body:{kind:'html',content:'<p>Native converted page content about actual upgrade costs.</p>'}},meta:{url,statusCode:200,truncated:false},content:[{type:'text',text}]});
+ await f.host.onEvent({id:'fish'},{seq:200,type:'tool/result',data:{message:{source:{kind:'tool'},toolCallId:'native-ok',content:[{type:'text',text}]}}});await f.host.onEvent({id:'fish'},{seq:201,type:'session-log-deepseek/delivery-accepted',data:{sessionId:'fish',throughSeq:200}});
+ const out=await f.next();assert.equal(out.status,'progress_required');const read=f.store.state().resource_reads[out.read_id];assert.equal(read.fetch_receipt.provider,'dsh-native');assert.match(read.fetch_receipt.provider_resolution,/does_not_attest/);assert.equal(read.reading_complete,true);
+});
 test('DS Fetch challenge text without its page heading is rejected before page delivery or exposure',async t=>{
  const f=await fixture(t);await f.searchAndSelect();
  const body='A required part of this site couldn’t load. This may be due to a browser extension, network issues, or browser settings. Please check your connection, disable any ad blockers, or try using a different browser.';
