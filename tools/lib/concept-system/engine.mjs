@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import {assessReadingDomain} from "./reading-domain.mjs";
 import { readingFatigue } from "./breadth.mjs";
 import { validateTopicLabel,topicKey } from "./topic-labels.mjs";
 import { matchesScene } from "./scenes.mjs";
@@ -290,7 +291,8 @@ export class ConceptEngine {
           before = revision(state),
           now = this.store.now();
         let result;
-        if (name.startsWith("exploration_")) {
+        if(name==='reading_domain_assess'){result=assessReadingDomain(this.store,d,emit,input,now)}
+        else if (name.startsWith("exploration_")) {
           result = mutateExploration(
             state,
             name,

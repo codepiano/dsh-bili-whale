@@ -7,8 +7,8 @@ export const FEED_RELEVANCE_POLICY = Object.freeze({
   algorithm: "feed-relevance-v1",
   min_relevance: 0.5,
 });
-const assessmentInstructions =
-  "先判断候选是否有助于当前探索目标：relevance=0 表示无关或仅碰巧命中同名词，0到0.5以下表示弱关联、不足以入选，0.5到1表示有材料支持的相关候选。deep 的前置知识、反例与争议也可相关，不要求先证明结论；discover 针对陌生领域的学习价值判断，不要求命中旧兴趣。无合适内容可全给0，清单可短于n或为空。立场 strength 是该立场对【选择阅读这条视频】的支持方向：建议读为正，建议跳过为负，无关为0；不是材料与立场的一致度，也不是确信程度。“克制所以跳过”应为负，不能因完成评估流程而加分。";
+export const assessmentInstructions =
+  "判断旧立场对当前问题是否适用：某次找原始报告要用文档的经验，不代表网页普遍优于视频。与当前目标无关的具体事件立场填0；不能仅因材料是报道/网页就加分，或仅因是视频/搬运就扣分，按实际证据与来源判断。先判断候选是否有助于当前探索目标：relevance=0 表示无关或仅碰巧命中同名词，0到0.5以下表示弱关联、不足以入选，0.5到1表示有材料支持的相关候选。deep 的前置知识、反例与争议也可相关，不要求先证明结论；discover 针对陌生领域的学习价值判断，不要求命中旧兴趣。无合适内容可全给0，清单可短于n或为空。立场 strength 是该立场对【选择阅读这条视频】的支持方向：建议读为正，建议跳过为负，无关为0；不是材料与立场的一致度，也不是确信程度。“克制所以跳过”应为负，不能因完成评估流程而加分。";
 
 function automaticContinuation(state,run_id) {
   const cycle=Object.values(state.auto_exploration_cycles??{}).find(c=>run_id===`${c.id}-r${c.round}`)

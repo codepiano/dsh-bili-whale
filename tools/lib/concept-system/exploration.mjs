@@ -374,6 +374,7 @@ export function mutateExploration(s, name, input, now, emit, links) {
       throw Error(
         "Skipped or failed exploration cannot report question progress; retry with outcome, source_ids and reason only (omit answered, remaining, next_step and question_status), then continue exploration_next",
       );
+    if(engaged&&d.exploration.path==='discover'&&['resource-page-v1','subtitle-pages-v1'].includes(d.feed_judgment?.read_policy)&&!d.exploration.domain_assessment)throw Error('Assess actual reading domain with reading_domain_assess before discovery progress');
     const q = state.questions[d.exploration.target.question_id];
     if (input.question_status && !q)
       throw Error("Question status needs a question target");

@@ -348,15 +348,17 @@ test('normal five-reading cycle spends per-target budgets and changes actual dom
   }
   if(out.status==='resource_read_required'){
    const packet=store.getObject(store.state().feed_searches[out.run_id].packet).content,domain=out.arguments.url.endsWith('/wrong')?'软件与工程':packet.exploration.selected_domain,i=out.arguments.url.split('/').at(-1),term=domain+out.run_id+'理论'+i
-   const body=term+' 是该领域的一个具体对象。本文提供原始材料，并说明适用边界，不能推广成未经证实的结论。'
+   const body=term+' 是该领域的一个具体对象。'+term+'机制是正文提炼的另一代表性关键词。本文提供原始材料，并说明适用边界，不能推广成未经证实的结论。'
    const receipt=await native('web_fetch',out.arguments,{url:out.arguments.url,statusCode:200,body:{kind:'text',content:body},truncated:false},{url:out.arguments.url,statusCode:200,truncated:false});await acknowledge(receipt.seq);continue
   }
+  if(out.next_action==='reading_domain_assess'){const r=store.state().resource_reads[out.read_id],source=store.state().concepts.sources[out.source_ids[0]],d=store.state().concepts.decisions[out.decision_id];await engine.call('reading_domain_assess',{...out.required_arguments,domain:d.exploration.candidate_domain,reason:'实际正文讨论这一内容领域',evidence:[{source_id:source.id,quote:source.excerpt.slice(0,20)}]});continue}
   if(out.next_action==='exploration_progress'){
    const d=store.state().concepts.decisions[out.decision_id],r=store.state().resource_reads[out.read_id],source=store.state().concepts.sources[out.source_ids[0]]
    if(d.exploration.path==='discover'){
     const m=store.state().concepts.members[d.exploration.target.candidate_id],domain=d.exploration.candidate_domain
-    await engine.call('concept_enrich',{key:'e-'+r.id,candidate_id:m.id,keywords:[m.content],evidence:[{read_id:r.id,page:1,quote:m.content}],reason:'从实际全文补原始来源'})
-    await engine.call('concept_review',{key:'p-'+r.id,candidate_id:m.id,status:'accepted',reason:'实际正文支持该内容领域',collections:[{collection_id:placements[domain],reason:'正文主题一致'}]})
+    const actual=await engine.call('concept_propose',{key:'body-topic-'+r.id,subject:'fish',content:m.content+'机制',tags:['topic'],source})
+    await engine.call('concept_review',{key:'p-'+r.id,candidate_id:actual.id,status:'accepted',reason:'按实际正文提炼不同代表性关键词',collections:[{collection_id:placements[domain],reason:'正文主题一致'}]})
+    assert.equal(store.state().concepts.members[m.id].status,'pending','original search candidate need not be placed for domain accounting')
    }
    const saved=await knowledge.save({read_id:r.id,summary:'实际正文说明了具体对象、原始材料与适用边界，不把单篇材料当成普遍结论。',thoughts:'仍需独立材料核对。',questions:[],quotes:[{source_id:source.id,quote:source.excerpt.slice(0,15)}]});assert.equal(saved.verified,true);readbacks.push(saved.memory_id)
    await engine.call('exploration_progress',{key:'progress-'+r.id,decision_id:d.id,outcome:'completed',source_ids:out.source_ids,answered:'读完实际正文并保留了来源及边界',remaining:'仍缺独立比较',next_step:'寻找独立材料',reason:'完整正文已经过宿主送达确认'});continue
@@ -392,4 +394,36 @@ test('Bilibili selection enforces the same domain gate and target budget before 
  const selected=await selector.resume({n:5,per:5});assert.equal(selected.selected.length,2);assert.ok(selected.selected.every(v=>v.bv!==videos[3].bv))
  assert.equal(selected.candidate_filter.candidates.find(v=>v.bvid===videos[3].bv).reason,'outside_required_domain')
  assert.ok(selected.decisions.every(d=>d.exploration.candidate_domain===domain));assert.equal(store.events({type:'exploration.exposed'}).length,0)
+})
+
+test('delivered-body domain ledger is independent of pending candidate identity, requires real quotes, and survives versioned corrections',async t=>{
+ const f=await fixture(t,'discover',1),{store,engine,native,next,acknowledge}=f;let {out}=await f.searchAndSelect();const decision=Object.values(store.state().concepts.decisions).at(-1),original=decision.exploration.target.candidate_id
+ const body='青铜时代的历史材料讨论气候与社会变化，必须区分多种解释。'
+ const receipt=await native('web_fetch',{url},{url,statusCode:200,body:{kind:'text',content:body},truncated:false},{url,statusCode:200,truncated:false})
+ const read=Object.values(store.state().resource_reads).at(-1)
+ const input={key:'body-domain',read_id:read.id,domain:'历史与社会',reason:'正文主题是青铜时代历史',evidence:[{source_id:read.sources[0].id,quote:'青铜时代的历史材料'}]}
+ await assert.rejects(engine.call('reading_domain_assess',input),/complete delivered/)
+ await acknowledge(receipt.seq);out=await next();assert.equal(out.next_action,'reading_domain_assess')
+ await assert.rejects(engine.call('reading_domain_assess',{...input,key:'fake-quote',evidence:[{source_id:read.sources[0].id,quote:'不存在的正文引文'}]}),/verbatim/)
+ await assert.rejects(engine.call('reading_domain_assess',{...input,key:'fake-source',evidence:[{source_id:'topic',quote:'软件维护'}]}),/belong/)
+ await assert.rejects(engine.call('exploration_progress',{key:'skip-domain',decision_id:decision.id,outcome:'completed',source_ids:[read.sources[0].id],answered:'读到历史材料',remaining:'仍需比较',next_step:'找更多原始资料',reason:'试图跳过正文领域判断'}),/reading_domain_assess/)
+ const before=store.events({type:'exploration.exposed'}).length;await engine.call('reading_domain_assess',input);await engine.call('reading_domain_assess',input)
+ assert.equal((await next()).next_action,'exploration_progress');assert.equal(store.state().concepts.decisions[decision.id].exploration.domain,'历史与社会');assert.equal(store.state().concepts.members[original].status,'pending');assert.equal(store.events({type:'exploration.exposed'}).length,before)
+ assert.equal(store.events({type:'reading.domain_assessed'}).length,1)
+ await engine.call('reading_domain_assess',{...input,key:'correction',domain:'哲学与认知',reason:'重新评估正文的主次领域'})
+ const event=store.events({type:'reading.domain_assessed'}).at(-1);assert.equal(event.data.previous.domain,'历史与社会');assert.equal(event.data.assessment.domain,'哲学与认知')
+ const fresh=new ObservationStore(store.directory);assert.equal(fresh.state().resource_reads[read.id].domain_assessment.domain,'哲学与认知');assert.equal(fresh.state().concepts.decisions[decision.id].exploration.domain_assessment.evidence[0].quote,input.evidence[0].quote)
+})
+
+test('same-content translations share one slate slot without platform quotas or suppressing other eligible candidates',async t=>{
+ const f=await fixture(t,'deep',2),{store,engine,native,next}=f;await f.prepare()
+ const en={url:'https://example.org/en/article',title:'原稿维护成本',snippet:'升级后返工花了两天，附复现与修复提交。'},translation={url:'https://example.org/vn/article',title:'同稿越南语版',snippet:'升级后返工花了两天，附复现与修复提交。'},video={url:'https://www.bilibili.com/video/BV1234567890',title:'维护成本的另一个实测',snippet:'升级后返工花了两天，附复现与修复提交。'}
+ await native('web_search',{queries},{sources:[en,translation,video],truncated:false})
+ for(let i=0;i<3;i++){
+  const out=await next(),v=out.packet.candidates[0];const input={...out.required_arguments,url:v.url,exploration:{relevance:1,quote:'升级后返工花了两天',reason:'相关的维护成本材料'},stances:out.packet.stances.map(s=>({collection_id:s.collection_id,member_id:s.member_id,strength:i===2?.6:1,quote:'附复现与修复提交',reason:'按证据支持阅读'})),...(v.url===translation.url?{duplicate_of:en.url}:{})}
+  if(i===1)await assert.rejects(engine.call('resource_assess',{...input,key:'unknown-dupe',duplicate_of:'https://example.org/invented'}),/known candidate/)
+  await engine.call('resource_assess',input)
+ }
+ await next();const run=store.state().web_runs['night-web-r1'];assert.equal(run.selected.length,2);assert.ok(run.selected.some(v=>v.kind==='video'));assert.equal(new Set(run.selected.map(v=>v.source_family)).size,2)
+ const scores=store.events({type:'decision.previewed'}).map(e=>store.getObject(e.data.object.hash).content);assert.ok(scores[0].rows.find(r=>r.label===video.url).score<scores[0].rows.find(r=>r.label===en.url).score,'duplicate grouping frees a slot without changing stance scores')
 })

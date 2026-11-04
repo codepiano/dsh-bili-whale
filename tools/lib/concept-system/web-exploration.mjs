@@ -1,3 +1,4 @@
+import {readingDomainRequest} from './reading-domain.mjs'
 import { readingDomain,requiredDomain,checkCandidateDomain } from './breadth.mjs';
 import {readingBudget,recordCompletedRead,settleExplorationCycle} from './exploration-budget.mjs'
 import {VideoReads,isVideoTextKind} from './video-reads.mjs'
@@ -5,7 +6,7 @@ import crypto from 'node:crypto'
 import {hash,redact} from './store.mjs'
 import {scoreDecision,commitScoredDecision} from './engine.mjs'
 import {compactFeed} from './feed-presentation.mjs'
-import {FEED_RELEVANCE_POLICY} from './feed-judgment.mjs'
+import {FEED_RELEVANCE_POLICY,assessmentInstructions} from './feed-judgment.mjs'
 
 export function resourceUrl(value) {
   const u=new URL(value)
@@ -31,7 +32,7 @@ export class WebExploration {
     if(run.phase==='search_failed'||run.phase==='empty')return {...base,status:'round_exhausted',reason:run.error??'本轮没有相关且可读取的候选'}
     if(run.phase==='judgment') {
       const candidate=run.candidates.find(c=>!run.assessments[c.url])
-      if(candidate)return {...base,status:'resource_judgment_required',next_action:'resource_assess',required_arguments:{run_id,key:run_id+':'+hash(candidate.url).slice(0,16)},packet:{...compactFeed(full),status:'resource_judgment_required',candidates:[candidate],selection_policy:FEED_RELEVANCE_POLICY,candidate_pool:run.candidate_pool,assessment_progress:{assessed:Object.keys(run.assessments).length,total:run.candidates.length},instructions:(requiredDomain(full.exploration)?`领域门禁：${requiredDomain(full.exploration)}；依据候选标题/摘要填写exploration.domain，不确定写未分类，不能为入选更改标签。`:'')+'只评当前URL，完整覆盖全部立场，引文来自实际标题/摘要。相关度低于0.5不选，strength是选择阅读的支持方向，无关填0。程序统一比较B站视频与网页候选，不因来源而抬分。搜索摘要不等于正文读完；discover必须提取真实陌生术语。'}}
+      if(candidate)return {...base,status:'resource_judgment_required',next_action:'resource_assess',required_arguments:{run_id,key:run_id+':'+hash(candidate.url).slice(0,16)},packet:{...compactFeed(full),status:'resource_judgment_required',candidates:[candidate],selection_policy:FEED_RELEVANCE_POLICY,candidate_pool:run.candidate_pool,assessment_progress:{assessed:Object.keys(run.assessments).length,total:run.candidates.length},instructions:(requiredDomain(full.exploration)?`领域门禁：${requiredDomain(full.exploration)}；依据候选标题/摘要填写exploration.domain，不确定写未分类，不能为入选更改标签。`:'')+assessmentInstructions+'已确认是同稿译文/重复转载且没有新增信息时，填写duplicate_of指向本轮已知原稿URL；程序只给同稿组一个阅读名额，不用抬高视频或网页分数。只评当前URL，完整覆盖全部立场，引文来自实际标题/摘要。相关度低于0.5不选，strength是选择阅读的支持方向，无关填0。程序统一比较B站视频与网页候选，不因来源而抬分。搜索摘要不等于正文读完；discover必须提取真实陌生术语。'}}
       await this.select(run_id,full,{...cycle,n:args.n})
       return this.next(cycle,args)
     }
@@ -53,6 +54,7 @@ export class WebExploration {
         return {...base,status:'awaiting_resource_delivery',next_action:'wait',read_id:read.id,instructions:'等待正常宿主模型交付回执，不重抓或自编正文。'}
       }
       const decision=store.state().concepts.decisions[selected.decision_id],progress=decision.exploration.progress,source_ids=decision.exploration.exposure?.source_ids??read.sources.map(s=>s.id)
+      const domainStep=readingDomainRequest(store.state().concepts,read,decision);if(domainStep)return {...base,...domainStep}
       if(!progress)return {...base,status:'progress_required',next_action:'exploration_progress',decision_id:decision.id,read_id:read.id,...(video?{bvid:read.bvid}:{resource_url:read.url}),source_ids:source_ids.slice(0,20),source_count:source_ids.length,target:decision.exploration.target,path:decision.exploration.path,instructions:'依据本次实际正文记录answered、remaining、next_step，引用给定来源；区分作者主张与独立证据。完成后维护概念与Mem，再回exploration_next继续预算。若实际内容为登录/验证/反爬页，用outcome:failed、source_ids和reason记录；不要传answered/remaining/next_step/question_status，不写Mem，然后继续exploration_next；失败不计阅读配额。'}
       if(['engaged','completed'].includes(progress.outcome)&&decision.exploration.path==='revisit'&&!Object.values(store.state().concepts.exploration?.questions??{}).some(q=>q.collection_id===decision.exploration.target.collection_id&&q.source_ids.some(id=>progress.source_ids.includes(id))))return {...base,status:'question_required',next_action:'exploration_question',collection_id:decision.exploration.target.collection_id,source_ids:progress.source_ids,decision_id:decision.id,instructions:'依据实际正文在原集合建立有来源的后续问题，然后继续exploration_next。'}
       cycle=await recordCompletedRead(store,cycle.id,read,decision,progress);base.reading_budget=readingBudget(cycle)
@@ -85,6 +87,7 @@ export class WebExploration {
       if(search.state_version!==hash(d.state.concepts))throw Error('Resource plan state changed; return to exploration_next')
       const packet=this.store.getObject(search.packet).content,candidate=run.candidates.find(c=>!run.assessments[c.url])
       if(!candidate||resourceUrl(input.url)!==candidate.url)throw Error('Assess the current archived candidate only')
+      if(input.duplicate_of){if(!run.candidates.some(c=>c.url===input.duplicate_of))throw Error('Duplicate target must be a known candidate in this round');const seen=new Set([input.url]);let ref=input.duplicate_of;while(ref){if(seen.has(ref))throw Error('Duplicate source chain cannot be cyclic');seen.add(ref);ref=run.assessments[ref]?.duplicate_of}}
       checkCandidateDomain(packet.exploration,input)
       const text=excerpt(candidate)
       if(!text.includes(input.exploration.quote))throw Error('Resource relevance quote must be verbatim')
@@ -106,6 +109,7 @@ export class WebExploration {
       const relevant=run.candidates.filter(c=>run.assessments[c.url]?.exploration.relevance>=FEED_RELEVANCE_POLICY.min_relevance&&checkCandidateDomain(route,run.assessments[c.url]))
       emit('resource.candidates_filtered',{run_id,required_domain:requiredDomain(route),reading_limit:route.reading_limit??null,candidates:run.candidates.map(c=>({url:c.url,domain:run.assessments[c.url]?.exploration.domain??null,eligible:relevant.some(v=>v.url===c.url)}))},{session_id:run.session_id})
       if(!relevant.length){run.phase='empty';return {selected:[]}}
+      const family=url=>{const seen=new Set();let ref=url;while(run.assessments[ref]?.duplicate_of&&!seen.has(ref)){seen.add(ref);ref=run.assessments[ref].duplicate_of}return ref}
       const options=relevant.map(c=>{
         const a=run.assessments[c.url];let target=route.target
         const contributions=a.stances.map(x=>({...x,relevance:1,purpose:'stance',reason:x.reason+'；原文：'+x.quote})).map(({quote,...x})=>x)
@@ -131,13 +135,13 @@ export class WebExploration {
         d.savePreview(preview_id,{object:object.hash,state_object:state_object.hash,committed:null});emit('decision.previewed',{id:preview_id,object,state_object,winner:scored.winner,state_version:scored.state_version},{trace_id:input.trace_id,source:'web'})
         const decision=commitScoredDecision(s,scored,{preview_id,reason:'选入网页阅读清单，尚未阅读'},store.now())
         d.savePreview(preview_id,{object:object.hash,state_object:state_object.hash,committed:decision.id})
-        run.selected.push({...run.candidates.find(c=>c.url===decision.selected),decision_id:decision.id})
-        remaining=remaining.filter(o=>o.label!==decision.selected)
+        run.selected.push({...run.candidates.find(c=>c.url===decision.selected),decision_id:decision.id,source_family:family(decision.selected)})
+        remaining=remaining.filter(o=>family(o.label)!==family(decision.selected))
         emit('decision.committed',decision,{decision_id:decision.id,trace_id:input.trace_id})
       }
       run.phase='reading'
       const object=store.object(s),version={id:crypto.randomUUID(),role:'concept_state',status:'present',hash:object.hash,redacted:object.redacted,actor:'resource_selection',at:new Date(store.now()).toISOString()}
-      d.addVersion(version);emit('snapshot.captured',version,{source:'web'});emit('resource.selected',{run_id,selected:run.selected,scope:'reading_slate_not_read'},{session_id:run.session_id});return {selected:run.selected}
+      d.addVersion(version);emit('snapshot.captured',version,{source:'web'});emit('resource.selected',{run_id,selected:run.selected,source_group_policy:'one_reading_per_declared_same_content_group',scope:'reading_slate_not_read'},{session_id:run.session_id});return {selected:run.selected}
 
     })
   }

@@ -1,3 +1,4 @@
+import {readingDomainRequest} from './reading-domain.mjs'
 import {WebExploration} from './web-exploration.mjs'
 import {readingBudget,recordCompletedRead,settleExplorationCycle} from './exploration-budget.mjs'
 import {compactFeed} from './feed-presentation.mjs'
@@ -85,6 +86,7 @@ export async function nextExploration(store,{cycle_id},{signal,feed=runFeed,read
       return {...envelope,status:'body_required',next_action:'video_read_page',arguments:{read_id:read.id,page},total_pages:read.sources.length,coverage:read.coverage}
     }
     const decision=store.state().concepts?.decisions[read.feed.decision_id],progress=decision?.exploration?.progress
+    const domainStep=readingDomainRequest(store.state().concepts,read,decision);if(domainStep)return {...envelope,...domainStep}
     if(!progress)return {...envelope,status:'progress_required',next_action:'exploration_progress',decision_id:read.feed.decision_id,read_id:read.id,source_ids:decision?.exploration?.exposure?.source_ids??[],target:decision?.exploration?.target,path:decision?.exploration?.path,instructions:'依据刚读完的字幕或音频转写写 answered、remaining、next_step；引用给定来源。有视觉疑问时先用 video_read_frames(read_id,times,reason) 补看相关时间点；需要核实口述时可用 debrief_read(audio=always) 经 speech 服务核实转写。未解决保持 active。revisit 在原集合下建立有来源的后续问题，然后再次调用 exploration_next。'}
     if(['engaged','completed'].includes(progress.outcome)&&decision.exploration.path==='revisit') {
       const questions=Object.values(store.state().concepts.exploration.questions)

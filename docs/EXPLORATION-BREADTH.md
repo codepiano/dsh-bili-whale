@@ -91,3 +91,38 @@ Isolation regression uses the real failure's concentration shape and unchanged
 seeds, both candidate gates, native host body/delivery receipts and a five-reading
 cycle. Production acceptance must still wait for the existing scheduler. Do not
 change its seed/time or send a special prompt or continuation to obtain a pass.
+
+## Body-domain ledger and source fairness
+
+The November 4 normal run read actual history, but its selected search candidates
+remained pending while fish accepted other representative keywords from those
+bodies. Requiring the original candidate ID to be placed left these readings
+unclassified and reset the streak between rounds.
+
+`reading_domain_assess` now records a primary domain, rationale and verbatim
+quotes from a complete delivered read. It validates the actual read/source IDs,
+retains corrections and prior judgments in events/versions, and updates both
+read and decision records without adding an exposure or changing question
+progress. Search metadata is not body evidence. Discovery cannot advance its
+sourced progress until this ordinary workflow step is done; failed/challenge
+pages can still be skipped without a domain or a consumed reading slot. Deep and
+revisit readings may also use this API to correct their domain from the body.
+
+Subsequent planning prefers this body record; legacy fallback may follow accepted
+representatives whose source/evidence explicitly references the actual read or
+its source IDs. Similar names alone are insufficient, and original pending
+candidates do not have to be accepted or deleted. Historical repairs use the
+same audited API and real original body quotes, not direct SQL or new exposures.
+
+Bilibili and web candidates still share the same score and threshold; no platform
+gets a reserved winner. Old case-specific advice to find a particular report in
+text must not be generalized into a web-format bonus or a video-format penalty.
+Normal judgment instructions require applicability to the current question.
+
+When a resource candidate is known to be a same-content translation/reprint with
+no new information, `resource_assess.duplicate_of` references another candidate
+URL in the same round. Unknown/self/cyclic references are rejected. Competition
+keeps original scores, but selects at most one representative per declared
+same-content family, freeing other slots for eligible material of either kind.
+This is model-declared source grouping, not a claim that different URLs always
+have different content, nor automatic semantic deduplication of unseen pages.

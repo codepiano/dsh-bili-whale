@@ -27,8 +27,11 @@ export function readingHistory(state,subject='fish') {
 }
 export function readingDomains(state,decision) {
   const x=decision.exploration;
+  if(x?.domain_assessment?.domain)return [x.domain_assessment.domain];
   if(x?.domain&&x.domain!=="未分类")return [x.domain];
   if(x?.target?.candidate_id){const id=x.target.candidate_id;const placed=Object.values(state.collections??{}).filter(c=>!c.archived_at&&c.members.includes(id));if(placed.length)return [...new Set(placed.map(c=>collectionDomain(c).name))]}
+  const exposed=x?.exposure;
+  if(exposed){const sourceIds=new Set(exposed.source_ids??[]);const linked=Object.values(state.collections??{}).filter(c=>!c.archived_at&&c.members.some(id=>{const m=state.members[id];return m?.status==='accepted'&&(sourceIds.has(m.source_id)||(m.evidence??[]).some(e=>e.read_id===exposed.read_id||sourceIds.has(e.source_id)))}));if(linked.length)return [...new Set(linked.map(c=>collectionDomain(c).name))]}
   const ids=x?.target?.collection_id?[x.target.collection_id]:decision.collection_ids??[];
   return x?.target?.question_id?[readingDomain(state,decision)]:[...new Set(ids.map(id=>collectionDomain(state.collections[id]).name))];
 }

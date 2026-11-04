@@ -72,6 +72,9 @@ test('normal video body delivery changes future interest penalties only after al
  const actual=interestPlan(state,'normal',now);assert.equal(actual.competition.rows.find(r=>r.label==='test').reading_penalty.reads,1)
  await reads.acceptDelivery({session_id:'fish',through_seq:10,host_seq:12})
  assert.equal(readingPenalty(store.state().concepts,s.collections.test,now).reads,1)
+ const {ConceptEngine}=await import('../tools/lib/concept-system/engine.mjs');const engine=new ConceptEngine(store),complete=store.journal.use(db=>JSON.parse(db.prepare('select payload from video_reads where id=?').get(r.id).payload))
+ await engine.call('reading_domain_assess',{key:'video-body-domain',read_id:r.id,domain:'软件与工程',reason:'真实字幕正文讨论架构维护',evidence:[{source_id:complete.sources[0].id,quote:'真实正文说明架构维护及版本升级'}]})
+ const saved=store.journal.use(db=>JSON.parse(db.prepare('select payload from video_reads where id=?').get(r.id).payload));assert.equal(saved.domain_assessment.domain,'软件与工程');assert.equal(store.events({type:'exploration.exposed'}).length,1)
 })
 
 test('method classification and sourced domain changes survive restart with original sources and versioned rationale',async t=>{
@@ -137,3 +140,12 @@ test('a one-reading remainder cannot overshoot the domain streak; compact normal
  const s=fixture();read(s,'r0','code','deep',200);read(s,'r1','code','deep',100);s.members.aaa={...s.members.history,id:'aaa',source_id:'aaa'};s.sources.aaa={...s.sources.history,id:'aaa',ref:'aaa'};s.collections.aaa={...s.collections.history,id:'aaa',members:['aaa'],domain:'未分类'};s.exploration.config.ratios={deep:0,revisit:1,discover:0};
  const p=explorationPlan(s,{subject:'fish',scene:'watch',seed:'normal',limit:50},now);assert.equal(p.path,'revisit');assert.equal(p.breadth_guard.required_domain,p.revisit[0].domain);assert.notEqual(p.revisit[0].domain,'未分类');assert.notEqual(p.revisit[0].domain,'软件与工程');
  })
+
+test('legacy discovery domain can follow actual read/source evidence on a different accepted representative, not just the search ID',()=>{
+ const s=fixture();s.members.pending={...s.members.code,id:'pending',status:'pending'}
+ s.decisions.actual={id:'actual',subject:'fish',exploration:{path:'discover',domain:'未分类',target:{candidate_id:'pending'},exposure:{read_id:'actual-read',source_ids:['actual-page'],at:now},progress:{outcome:'completed'}}}
+ assert.deepEqual(readingDomains(s,s.decisions.actual),[])
+ s.members.history.evidence=[{read_id:'actual-read',source_id:'actual-page',quote:'历史正文中有依据的代表词'}]
+ assert.deepEqual(readingDomains(s,s.decisions.actual),['历史与社会']);assert.equal(s.members.pending.status,'pending')
+ s.decisions.actual.exploration.domain_assessment={read_id:'actual-read',domain:'哲学与认知'};assert.deepEqual(readingDomains(s,s.decisions.actual),['哲学与认知'],'explicit body assessment is authoritative and independent of later placement')
+})
