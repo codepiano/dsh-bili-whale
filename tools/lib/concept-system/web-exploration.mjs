@@ -167,11 +167,11 @@ export class WebExploration {
           if(completed.some(r=>bvid?r.bvid===bvid:r.url===url))return
           pool.push({url,title:String(raw.title??url).slice(0,1000),snippet:String(raw.snippet??'').slice(0,3000),published_at:raw.publishedAt??null,kind:bvid?'video':'web',...(bvid?{bvid}:{}),providers})
         }catch{}}
-        for(const c of (result.value.bilibili?.candidates??[]).slice(0,8))if(/^BV[0-9A-Za-z]{10}$/.test(c.bv))add(bili,{url:'https://www.bilibili.com/video/'+c.bv,title:c.t,snippet:c.description},['bilibili'])
-        for(const c of result.value.sources.slice(0,8))add(web,c,[exec.name==='fish_web_search'?'deepseek-search-api':'web_search'])
+        for(const c of (result.value.bilibili?.candidates??[]))if(/^BV[0-9A-Za-z]{10}$/.test(c.bv))add(bili,{url:'https://www.bilibili.com/video/'+c.bv,title:c.t,snippet:c.description},['bilibili'])
+        for(const c of result.value.sources)add(web,c,[exec.name==='fish_web_search'?'deepseek-search-api':'web_search'])
         const all=[]
-        for(let rank=0;rank<8;rank++)for(const pool of [bili,web]){const c=pool[rank];if(!c)continue;const prior=all.find(x=>x.url===c.url);if(prior)prior.providers=[...new Set([...prior.providers,...c.providers])];else all.push(c)}
-        run.all_candidates=redact(all);run.candidates=run.all_candidates.slice(0,8);run.candidate_pool={total:all.length,retained:run.candidates.length,truncated:all.length>8}
+        for(let rank=0;rank<Math.max(bili.length,web.length);rank++)for(const pool of [bili,web]){const c=pool[rank];if(!c)continue;const prior=all.find(x=>x.url===c.url);if(prior)prior.providers=[...new Set([...prior.providers,...c.providers])];else all.push(c)}
+        run.all_candidates=redact(all);run.candidates=run.all_candidates;run.candidate_pool={total:all.length,retained:run.candidates.length,truncated:false}
         run.phase=run.candidates.length?'judgment':'empty';run.provider_status={bilibili:result.value.bilibili?.status??'not_requested',deepseek_api:exec.name!=='fish_web_search'?'not_requested':result.value.api_unavailable?'unavailable':result.value.successful_requests===0&&result.value.failed_requests?'failed':result.value.failed_requests?'partial_failure':'ok'}
         run.search_receipt={call_id:exec.callId,object:this.store.object({queries:run.queries,result:result.value}),provider:result.value.provider??'web_search',billable_requests:result.value.billable_requests??null,truncated:result.value.truncated===true}
         emit('resource.search_observed',{run_id:run.run_id,...run.search_receipt},{session_id});return

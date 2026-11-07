@@ -427,3 +427,29 @@ test('same-content translations share one slate slot without platform quotas or 
  await next();const run=store.state().web_runs['night-web-r1'];assert.equal(run.selected.length,2);assert.ok(run.selected.some(v=>v.kind==='video'));assert.equal(new Set(run.selected.map(v=>v.source_family)).size,2)
  const scores=store.events({type:'decision.previewed'}).map(e=>store.getObject(e.data.object.hash).content);assert.ok(scores[0].rows.find(r=>r.label===video.url).score<scores[0].rows.find(r=>r.label===en.url).score,'duplicate grouping frees a slot without changing stance scores')
 })
+
+
+test('joint search assesses every returned candidate before selection, including either source beyond rank four',async t=>{
+  for(const winnerKind of ['web','video']) {
+    const f=await fixture(t,'deep',2),prepared=await f.prepare('both')
+    const sources=Array.from({length:8},(_,i)=>({url:`https://example.org/material-${i}`,title:`原始返工材料${i}`,snippet:'记录升级返工工时，附复现与修复提交'}))
+    const videos=Array.from({length:8},(_,i)=>({bv:`BV${String(i+1).padStart(10,'0')}`,t:`原始返工视频${i}`,description:'记录升级返工工时，附复现与修复提交'}))
+    // The old alternating top-eight retained only four entries from each source.
+    await f.native('web_search',{queries},{sources,bilibili:{status:'ok',candidates:videos},successful_requests:1,failed_requests:0,truncated:false})
+    let out=await f.next();const seen=[]
+    const winner=winnerKind==='web'?sources[4].url:'https://www.bilibili.com/video/'+videos[7].bv
+    while(out.next_action==='resource_assess') {
+      const c=out.packet.candidates[0];seen.push(c.url)
+      assert.equal(out.packet.candidate_pool.total,16);assert.equal(out.packet.candidate_pool.retained,16);assert.equal(out.packet.candidate_pool.truncated,false)
+      assert.equal(out.packet.assessment_progress.total,16)
+      await f.engine.call('resource_assess',{...out.required_arguments,url:c.url,exploration:{relevance:c.url===winner?0.9:0.1,reason:c.url===winner?'对当前问题有原始证据':'仅有宽泛同词，不足以回答问题',quote:'原始返工'},stances:out.packet.stances.map(s=>({collection_id:s.collection_id,member_id:s.member_id,strength:0,reason:'当前证据与此立场无关',quote:'升级返工工时'}))})
+      out=await f.next()
+    }
+    assert.equal(new Set(seen).size,16)
+    assert.equal(out.next_action,winnerKind==='web'?'fish_web_fetch':'debrief_read')
+    const run=f.store.state().web_runs[prepared.run_id]
+    assert.deepEqual(run.selected.map(s=>s.url),[winner])
+    assert.equal(out.reading_budget.limit,2);assert.equal(out.reading_budget.completed,0)
+    assert.equal(f.store.events({type:'exploration.exposed'}).length,0)
+  }
+})
