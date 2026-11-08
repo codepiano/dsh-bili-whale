@@ -11,6 +11,7 @@ import {VideoReads,videoMaterial} from '../tools/lib/concept-system/video-reads.
 import {LearningQueue,LearningWorker,validateEvaluation} from '../tools/lib/concept-system/learning.mjs'
 import {FeedConcepts} from '../tools/lib/concept-system/feed.mjs'
 import {ConceptEngine} from '../tools/lib/concept-system/engine.mjs'
+import {VideoKnowledge} from '../tools/lib/concept-system/video-knowledge.mjs'
 import {createLearningHost} from '../lib/learning-host.js'
 
 const bv='BV1234567890',route={provider:'fixture',model:'fixture'}
@@ -183,6 +184,9 @@ test('real debrief CLI records text independently of missing cover, then host re
   const record=(await reads.store.events({type:'video.material_acquired'}))[0]
   const material=reads.store.getObject(record.data.object.hash).content
   assert.equal(material.components.cover,'failed');assert.equal(material.components.subtitles,'success');assert.equal(material.track.automatic,true)
+  assert.deepEqual(reads.seen(),[]);assert.equal(reads.store.events({type:'learning.enqueued'}).length,0)
+  const id=marker.split(':')[1]
+  await reads.acceptOutput(JSON.stringify(await reads.page({read_id:id,page:1})),{session_id:'fish',route})
   assert.deepEqual(reads.seen(),[bv]);assert.equal(reads.store.events({type:'learning.enqueued'}).length,1)
   assert.ok(fs.readFileSync(s.requests,'utf8').split('\n').filter(Boolean).every(l=>JSON.parse(l).method==='GET'))
 })
@@ -232,4 +236,39 @@ test('CLI stages audio for cloud speech without launching local ASR',async t=>{
   const never=cliBox(t,{no_subtitles:true,reading:{audio:speech}});never.env.BILI_SPEECH_TOKEN='fixture-speech-token'
   assert.equal(never.run(['--audio','never']).status,0)
   assert.doesNotMatch(fs.readFileSync(never.requests,'utf8'),/playurl|transcriptions/)
+})
+
+
+test('standalone CLI receipt completes paged host delivery and verified Mem save without a feed slate',async t=>{
+  const s=cliBox(t,{body:Array.from({length:4},(_,i)=>({from:i*20,to:(i+1)*20,content:'证据与推测必须区分。'.repeat(300)}))}),r=s.run()
+  assert.equal(r.status,0,r.stderr)
+  const marker=r.stdout.match(/BILI_DEBRIEF_RECEIPT:[a-f0-9-]+:[a-f0-9]+/)[0],id=marker.split(':')[1]
+  assert.ok(r.stdout.includes('read_id='+id))
+  const store=new ObservationStore(s.concept),reads=new VideoReads(store),ctx=host()
+  const learning=createLearningHost({ctx,observer:new Observer({store,paths:{}}),config:()=>({conceptSystem:{observe:true,learning:true}}),sessionIds:['fish'],start:false})
+  t.after(()=>learning.stop())
+  const deepseek={provider:'deepseek-account',model:'fixture'}
+  await learning.onEvent({id:'fish'},{type:'request/header',data:{header:{config:deepseek}}})
+  await learning.onEvent({id:'fish'},tool(r.stdout))
+  const read=await reads.get(id)
+  assert.equal(read.feed,null);assert.equal(read.requires_delivery,true);assert.ok(read.sources.length>1)
+  const values=new Map(),knowledge=new VideoKnowledge(store,{run:async(args,content)=>{
+    if(args[1]==='add'){values.set(args[args.indexOf('--id')+1],content);return {success:true}}
+    return {id:args[2],content:values.get(args[2])}
+  }})
+  const input={read_id:id,summary:'视频要求区分证据与推测。',thoughts:'需要检验依据。',questions:[],quotes:[{source_id:read.sources[0].id,quote:'证据与推测必须区分。'}]}
+  await assert.rejects(knowledge.save(input),/complete, delivered/)
+  for(let page=1;page<=read.sources.length;page++){
+    await learning.onEvent({id:'fish'},{...tool(JSON.stringify(await reads.page({read_id:id,page}))),seq:10+page})
+    await assert.rejects(knowledge.save(input),/complete, delivered/)
+  }
+  const seq=10+read.sources.length
+  await learning.onEvent({id:'fish'},{type:'session-log-deepseek/delivery-accepted',seq:seq+1,data:{sessionId:'fish',throughSeq:seq-1}})
+  await assert.rejects(knowledge.save(input),/complete, delivered/)
+  await learning.onEvent({id:'fish'},{type:'session-log-deepseek/delivery-accepted',seq:seq+2,data:{sessionId:'fish',throughSeq:seq}})
+  const saved=await knowledge.save(input)
+  assert.equal(saved.verified,true);assert.equal(values.size,1)
+  assert.equal((await knowledge.save(input)).reused,true)
+  assert.equal(store.events({type:'exploration.exposed'}).length,0)
+  assert.equal(store.events({type:'learning.enqueued'}).length,0)
 })

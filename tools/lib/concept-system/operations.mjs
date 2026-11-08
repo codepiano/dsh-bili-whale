@@ -16,8 +16,8 @@ export async function runFeed(input,{signal,node=process.execPath,env=process.en
 }
 export async function readDebrief(input,{signal}={}) {
   signal?.throwIfAborted()
-  const {stdout}=await run(process.execPath,[debrief,input.bvid,'--no-frames','--audio',input.audio??'auto',...(input.context?['--context']:[]),'--feed-run-id',input.feed_run_id],
+  const {stdout}=await run(process.execPath,[debrief,input.bvid,'--no-frames','--audio',input.audio??'auto',...(input.context?['--context']:[]),...(input.feed_run_id?['--feed-run-id',input.feed_run_id]:[])],
     {signal,timeout:420000,maxBuffer:1024*1024,env:{...process.env,DSH_NODE:process.execPath}})
   const marker=stdout.match(/BILI_DEBRIEF_RECEIPT:[a-f0-9-]{36}:[a-f0-9]{64}/)?.[0]
-  return redact({stdout,receipt_marker:marker??null,pending_read_id:stdout.match(/BILI_AUDIO_PENDING:([a-f0-9-]{36})/)?.[1]??null,scope:'actual_debrief_material_not_watch_completion'})
+  return redact({stdout,read_id:marker?.split(':')[1]??null,receipt_marker:marker??null,pending_read_id:stdout.match(/BILI_AUDIO_PENDING:([a-f0-9-]{36})/)?.[1]??null,scope:'actual_debrief_material_not_watch_completion'})
 }

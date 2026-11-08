@@ -29,7 +29,7 @@ const descriptions = {
   video_read_frames:'仅在画面信息确有必要时补充指定 read_id 的 1–6 个时间点截图并直接返回图片；需写 reason。记录 BV/CID、时间、图片哈希和原阅读关联，生成图片不等于已看懂全片。',
   video_read_page:'读取指定真实 read_id 的一页完整字幕或云端音频转写正文（非简介），按 total_pages 逐页调用；仅原生工具结果实际含完整正文时记录该页，全部读完才计曝光。',
   feed_run: "执行真实只读平台检索与选片流程，固定参数由插件服务运行，不需要会话终端写入学习目录。按 search_plan_required / judgment_required 完成规划和判断后，重复相同参数恢复同一 run-id。不会评论、收藏或发送。",
-  debrief_read: "字幕优先读取已选视频并返回物料回执；缺字幕时调用 common-mcp speech HTTP 服务云端转写，不使用本地模型。audio=always 用于核实口述，never 禁用转写；context=true 才补封面/弹幕/热评。画面另用 video_read_frames；无任意命令或路径参数。",
+  debrief_read: "字幕优先读取视频并返回真实 read_id 与物料回执；feed_run_id 可省略用于独立读取，提供时仍严格核验已选清单。取得材料后须用 video_read_page 逐页交付正文，再调用 video_knowledge_save；缺字幕时调用 common-mcp speech HTTP 服务云端转写，不使用本地模型。audio=always 用于核实口述，never 禁用转写；context=true 才补封面/弹幕/热评。画面另用 video_read_frames；无任意命令或路径参数。",
   feed_search_plan:
     "为 feed 的 search_plan_required 阶段提出符合探索路径的查询词与理由，并选择source=both（默认双来源）、bilibili或web；文章、文档、论文、仓库README/issue/commit用web，状态机随后要求鱼专用fish_web_search及自行选择web_fetch/fish_web_fetch/fish_gateway_fetch；不修改概念标签。随后恢复原 run-id 真实检索。",
   feed_assess:

@@ -81,7 +81,7 @@ export const schemas = {
   video_read_frames:z.object({read_id:id,times:z.array(z.number().finite().min(0)).min(1).max(6),reason:text}).strict(),
   video_read_page:z.object({read_id:id,page:z.number().int().min(1).max(24)}).strict(),
   feed_run: z.object({run_id:id,seed:key.optional(),n:z.number().int().min(1).max(20).default(1),per:z.number().int().min(1).max(20).default(2),pool:z.number().int().min(1).max(200).default(20),source:z.enum(['search','popular','rank','following','all']).default('search')}).strict(),
-  debrief_read: z.object({bvid:z.string().regex(/^BV[0-9A-Za-z]{10}$/),feed_run_id:id,audio:z.enum(['auto','never','always']).optional(),context:z.boolean().optional()}).strict(),
+  debrief_read: z.object({bvid:z.string().regex(/^BV[0-9A-Za-z]{10}$/),feed_run_id:id.optional(),audio:z.enum(['auto','never','always']).optional(),context:z.boolean().optional()}).strict(),
   feed_search_plan: z
     .object({
       key,

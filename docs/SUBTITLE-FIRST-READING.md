@@ -43,14 +43,24 @@ speech 同时提供 MCP 和原生 HTTP API，本插件使用后者：
 
 ## 按需补充
 
-- `debrief_read({bvid,feed_run_id})`：字幕优先，缺字幕使用 speech 云端转写。
+- `debrief_read({bvid,feed_run_id?})`：字幕优先，缺字幕使用 speech 云端转写。独立读取可省略 feed_run_id；提供时仍校验视频确实属于该轮清单。
 - `audio:"never"` 禁用音频；`audio:"always"` 明确需要核实口述时使用同一 speech 入口。
 - `context:true` 才取封面、弹幕和热评，不混入视频正文学习来源。
 - `video_read_frames({read_id,times:[35,92],reason:"核实图表刻度"})`：仅按需取1–6个片内时间点，直接返回图片；保留BV、CID、时间、图片哈希及原阅读关联。仍须下载视频流，512MiB/180秒上限，无全片场景检测，不把生成图片当作模型已看懂。
 
 CLI 支持 `debrief <BV> [--audio auto|never|always] [--context] [--frames] [--feed-run-id ID]`。旧九宫格/硬字幕条只在显式 --frames/--substrip 时启用，--no-frames 兼容保留。
 
+## 独立 CLI 读取与入库
+
+观察开关开启时，CLI `debrief <BV>` 不需要 feed slate 就会生成真实材料回执，并明确输出 `read_id` 和正文页数；MCP `debrief_read` 同样返回 `read_id`。feed 关联只用于追溯选题，不是阅读或入库的前提。
+
+独立读取与 cycle 读取使用相同的逐页交付门槛：鱼会话的成功工具结果接收材料回执后，用 `video_read_page({read_id,page})` 接收全部正文页；DeepSeek 路由还须由宿主确认正文送达模型。之后 `video_knowledge_save` 校验原文引文、写入 Mem 并读回验证。取得字幕文件或仅看到回执不能直接入库；简介、截断材料、未送达正文继续拒收。独立读取不伪造 feed 决策或探索曝光。
+
+手工在会话外运行 CLI 只取得材料，不自动绑定会话。应将原始命令输出作为鱼会话的真实工具结果交付，或在鱼会话中调用不带 feed_run_id 的 `debrief_read`；不编造编号或送达记录。历史材料不自动改写为已读，也不需要等未来搜索再次选中后才能重新读取入库。
+
 ## 验证边界
+
+2026-11-09 独立 debrief 入库修复：独立工作树与依赖、临时用户目录/数据库、拦截网络和模拟 Mem 写入/读回下，Node 26 全量 367 项通过；宿主 Node 24 的 debrief、MCP、正文送达与知识保存相关 39 项通过。覆盖无 feed 的真实 CLI/MCP 调用、多页正文、未送达拒收、保存读回及幂等；未向真实 Mem 写入测试内容。
 
 使用独立开发工作树、独立依赖、临时 HOME/DSH_HOME/数据库及模拟媒体与语音API验证，不写真实学习库。全量串行回归298/298通过，观察页构建通过。覆盖MD5/字节数、流式表单上传、凭据隔离、本机文件清理、云端提交、未知受理恢复、稳定身份、节流、任务完成回流、正文交付、来源追溯及后续作息恢复；缺配置/云端失败不会执行本地模型。
 

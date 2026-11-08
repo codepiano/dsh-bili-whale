@@ -51,7 +51,7 @@ export class VideoReads {
         if(!selection||!selection.selected.some(v=>v.bv===bvid))throw Error('Video is not in the specified feed reading slate')
         feed={run_id:options.feed_run_id,trace_id:selection.trace_id,decision_id:selection.mode==='active'?(selection.decisions.find(x=>x.selected===bvid)?.id??null):null}
       }
-      const read={id:crypto.randomUUID(),bvid,feed,...(feed?{read_policy:'subtitle-pages-v1'}:{}),kind:'none',status:'started',started_at:new Date(this.store.now()).toISOString(),options:redact(options)}
+      const read={id:crypto.randomUUID(),bvid,feed,...(feed||options.read_policy==='subtitle-pages-v1'?{read_policy:'subtitle-pages-v1'}:{}),kind:'none',status:'started',started_at:new Date(this.store.now()).toISOString(),options:redact(options)}
       d.reads.put(read);emit('video.read_started',{read_id:read.id,bvid,options:read.options},{trace_id:feed?.trace_id??null,decision_id:feed?.decision_id??null});return read
     })
   }
@@ -65,7 +65,7 @@ export class VideoReads {
         content_hash:material.content_hash,coverage:material.coverage,completed_at:new Date(this.store.now()).toISOString(),parts_assessed:0}
       d.reads.put(next)
       emit('video.material_acquired',{read_id:id,bvid:read.bvid,kind:material.kind,object,coverage:material.coverage},{trace_id:read.feed?.trace_id??null,decision_id:read.feed?.decision_id??null})
-      return {id,material_hash:object.hash,kind:material.kind,marker:`BILI_DEBRIEF_RECEIPT:${id}:${object.hash}`}
+      return {id,material_hash:object.hash,kind:material.kind,total_pages:isVideoTextKind(material.kind)?sources.length:0,marker:`BILI_DEBRIEF_RECEIPT:${id}:${object.hash}`}
     })
   }
   deferAudio(id,packet,speech) {
