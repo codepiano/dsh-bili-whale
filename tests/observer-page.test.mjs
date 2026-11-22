@@ -17,7 +17,7 @@ function box(t) {
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   return root;
 }
-async function start(t, directory) {
+async function start(t, directory, logDirectory = directory) {
   const assets = path.join(box(t), "assets");
   fs.mkdirSync(assets);
   for (const [name, text] of Object.entries({
@@ -26,7 +26,7 @@ async function start(t, directory) {
     "app.css": "body{}",
   }))
     fs.writeFileSync(path.join(assets, name), text);
-  const s = await startObserverServer({ directory, assetDirectory: assets });
+  const s = await startObserverServer({ directory, logDirectory, assetDirectory: assets });
   t.after(() => s.close());
   return s;
 }
@@ -222,3 +222,46 @@ test('archived empty groups stay out of the active catalog and page but retain d
   assert.equal(reader.overview().counts.collections,before)
   assert.ok(reader.collections().items.some(c=>c.id===f.a.group))
 })
+
+test("fish logs read live diary files and page activity without an observation database", async (t) => {
+  const root = box(t);
+  const logs = box(t);
+  const server = await start(t, root, logs);
+  const get = async (url) => {
+    const response = await fetch(server.url + "/api/logs/" + url);
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("cache-control"), "no-store");
+    return response.json();
+  };
+  assert.deepEqual(await get("diary"), { diary: null });
+  assert.deepEqual(await get("activity"), { items: [], total: 0, page: 1, pages: 1, skipped: 0 });
+
+  const diary = path.join(logs, "whale-diary.md");
+  const privateDiary = path.join(logs, "whale-diary-private.md");
+  const activity = path.join(logs, "whale-log.jsonl");
+  fs.writeFileSync(diary, "## 公开日记");
+  fs.writeFileSync(privateDiary, "## 私人日记");
+  const event = (kind, at = "2026-11-22T19:00:00.000Z") =>
+    JSON.stringify({ kind, at, target: "BVtest", note: "第一行\n第二行", extra: "ignored" });
+  const originalLog = [event("watch"), "", "{broken", event("night", "bad time"), event("read")].join("\r\n");
+  fs.writeFileSync(activity, originalLog);
+  assert.equal((await get("diary")).diary.content, "## 公开日记");
+  assert.equal((await get("diary?kind=private")).diary.content, "## 私人日记");
+  const recent = await get("activity?limit=1");
+  assert.deepEqual(recent, {
+    items: [{ kind: "read", at: "2026-11-22T19:00:00.000Z", target: "BVtest", note: "第一行\n第二行" }],
+    total: 2,
+    page: 1,
+    pages: 2,
+    skipped: 2,
+  });
+  assert.equal((await get("activity?limit=1&page=2")).items[0].kind, "watch");
+  fs.appendFileSync(diary, "\n新正文");
+  assert.equal((await get("diary")).diary.content, "## 公开日记\n新正文");
+  assert.equal(fs.readFileSync(activity, "utf8"), originalLog);
+  assert.deepEqual(fs.readdirSync(root), []);
+  assert.equal((await fetch(server.url + "/api/logs/diary?kind=../credentials")).status, 400);
+  assert.equal((await fetch(server.url + "/api/logs/diary?kind=private", {
+    headers: { "Sec-Fetch-Site": "same-site" },
+  })).status, 403);
+});

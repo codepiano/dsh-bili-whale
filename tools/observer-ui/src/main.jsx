@@ -1,5 +1,7 @@
 import React, { useEffect, useState, useMemo } from "react";
 import { createRoot } from "react-dom/client";
+import Markdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import {
   MantineProvider,
   createTheme,
@@ -23,6 +25,7 @@ import {
   Code,
   Tooltip,
   ScrollArea,
+  Tabs,
 } from "@mantine/core";
 import { useDebouncedValue } from "@mantine/hooks";
 import {
@@ -30,6 +33,7 @@ import {
   IconCirclesRelation,
   IconRoute,
   IconHistory,
+  IconNotebook,
   IconRefresh,
   IconArrowUpRight,
   IconLock,
@@ -1189,7 +1193,138 @@ function Versions({ overview, revision }) {
     </>
   );
 }
+const logDate = new Intl.DateTimeFormat("zh-CN", {
+  timeZone: "Asia/Shanghai",
+  dateStyle: "medium",
+  timeStyle: "medium",
+});
+
+const markdownComponents = {
+  h1: ({ children }) => <h2>{children}</h2>,
+  a: ({ href, children }) => {
+    if (href?.startsWith("#")) return <a href={href}>{children}</a>;
+    if (!/^https?:\/\//i.test(href ?? "")) return <span>{children}</span>;
+    return (
+      <a href={href} target="_blank" rel="noopener noreferrer">
+        {children}
+      </a>
+    );
+  },
+  img: ({ alt }) => (alt ? <span>{alt}</span> : null),
+  table: ({ children }) => (
+    <div className="diary-table">
+      <table>{children}</table>
+    </div>
+  ),
+};
+
+function Diary({ kind, revision }) {
+  const state = useData("/api/logs/diary?" + params({ kind }), revision);
+  return (
+    <State state={state}>
+      {({ diary }) =>
+        diary?.content.trim() ? (
+          <Paper className="diary-paper" withBorder radius="md" p="xl">
+            <Text size="xs" c="dimmed">
+              更新于{" "}
+              <time dateTime={diary.updatedAt}>
+                {logDate.format(new Date(diary.updatedAt))}
+              </time>{" "}
+              · 北京时间
+            </Text>
+            <article className="diary-prose">
+              <Markdown
+                remarkPlugins={[remarkGfm]}
+                components={markdownComponents}
+                skipHtml
+              >
+                {diary.content}
+              </Markdown>
+            </article>
+          </Paper>
+        ) : (
+          <Empty title="这本日记还是空的" text="鱼写下内容后，刷新即可查看。" />
+        )
+      }
+    </State>
+  );
+}
+
+function Activity({ revision }) {
+  const [page, setPage] = useState(1);
+  const state = useData("/api/logs/activity?" + params({ page }), revision);
+  return (
+    <State state={state}>
+      {(activity) => (
+        <Stack gap="md">
+          {activity.skipped > 0 && (
+            <Alert color="yellow">有 {activity.skipped} 条活动记录无法解析。</Alert>
+          )}
+          {activity.items.length ? (
+            <>
+              <Text size="sm" c="dimmed">
+                共 {activity.total} 条 · 最新记录在前 · 北京时间
+              </Text>
+              <Paper withBorder radius="md">
+                <ol className="activity-list" role="list">
+                  {activity.items.map(({ at, kind, target, note }, index) => (
+                    <li key={index} className="activity-entry">
+                      <time dateTime={at}>{logDate.format(new Date(at))}</time>
+                      <div className="wrap">
+                        <Text fw={650}>
+                          {kind}{target ? ` · ${target}` : ""}
+                        </Text>
+                        {note && <Text size="sm" mt={4}>{note}</Text>}
+                      </div>
+                    </li>
+                  ))}
+                </ol>
+              </Paper>
+              {activity.pages > 1 && (
+                <Pagination
+                  value={activity.page}
+                  onChange={setPage}
+                  total={activity.pages}
+                  getItemProps={(n) => ({ "aria-label": `第 ${n} 页` })}
+                />
+              )}
+            </>
+          ) : (
+            <Empty title="还没有活动记录" text="鱼记录活动后，刷新即可查看。" />
+          )}
+        </Stack>
+      )}
+    </State>
+  );
+}
+
+function Logs({ revision }) {
+  return (
+    <Tabs defaultValue="activity" keepMounted={false}>
+      <Tabs.List aria-label="日志类型" mb="lg">
+        <Tabs.Tab value="activity">活动日志</Tabs.Tab>
+        <Tabs.Tab value="public">公开日记</Tabs.Tab>
+        <Tabs.Tab value="private">私人日记</Tabs.Tab>
+      </Tabs.List>
+      <Tabs.Panel value="activity">
+        <Activity revision={revision} />
+      </Tabs.Panel>
+      <Tabs.Panel value="public">
+        <Diary kind="public" revision={revision} />
+      </Tabs.Panel>
+      <Tabs.Panel value="private">
+        <Diary kind="private" revision={revision} />
+      </Tabs.Panel>
+    </Tabs>
+  );
+}
+
 const pages = {
+  logs: {
+    title: "鱼的日志",
+    sub: "回看鱼的活动记录和自己写下的日记。",
+    icon: IconNotebook,
+  },
   collections: {
     title: "概念集合",
     sub: "查看观点、兴趣与表达素材怎样积累，保留每个成员的来历。",
@@ -1206,10 +1341,71 @@ const pages = {
     icon: IconHistory,
   },
 };
-function App() {
-  const [page, setPage] = useState("collections"),
-    [revision, setRevision] = useState(0);
+function Observation({ page, revision }) {
   const state = useData("/api/overview", revision);
+  return (
+    <>
+      <State state={state}>
+        {(overview) => (
+          <>
+            {!overview.available && (
+              <Alert
+                color="gray"
+                mb="lg"
+                title={
+                  overview.legacy
+                    ? "检测到旧版日志，页面不会自动迁移"
+                    : "尚未创建观察数据库"
+                }
+              >
+                {overview.legacy
+                  ? "请先使用观察 CLI 完成迁移，再刷新此页。"
+                  : "启用观察并产生记录后，会在这里显示。页面本身不会创建数据库或生成数据。"}
+              </Alert>
+            )}
+            <div className="stats">
+              <Stat label="概念集合" value={overview.counts.collections} />
+              <Stat label="决策预演" value={overview.counts.previews} />
+              <Stat label="关键文件版本" value={overview.counts.versions} />
+              <Paper className="last-event" p="md">
+                <Text size="xs" c="dimmed">
+                  最近一条观察事件
+                </Text>
+                <Text size="sm" fw={500} mt="xs">
+                  {overview.last_event
+                    ? date(overview.last_event)
+                    : "暂无记录"}
+                </Text>
+                <Text size="xs" c="dimmed" mt={4}>
+                  北京时间 · 共 {overview.counts.events} 条事件
+                </Text>
+              </Paper>
+            </div>
+            <section className="content" key={page}>
+              {page === "collections" ? (
+                <Collections revision={revision} />
+              ) : page === "decisions" ? (
+                <Decisions revision={revision} />
+              ) : (
+                <Versions overview={overview} revision={revision} />
+              )}
+            </section>
+          </>
+        )}
+      </State>
+      <footer>
+        本地 SQLite 与归档快照 · 观察记录说明行为，不能单独证明因果
+      </footer>
+    </>
+  );
+}
+function App() {
+  const [page, setPage] = useState(() =>
+      new URLSearchParams(window.location.search).get("page") === "logs"
+        ? "logs"
+        : "collections",
+    ),
+    [revision, setRevision] = useState(0);
   return (
     <div className="shell">
       <aside className="sidebar">
@@ -1270,62 +1466,17 @@ function App() {
             leftSection={<IconRefresh size={16} />}
             variant="default"
             onClick={() => setRevision((r) => r + 1)}
-            loading={state.loading}
           >
             刷新记录
           </Button>
         </header>
-        <State state={state}>
-          {(overview) => (
-            <>
-              {!overview.available && (
-                <Alert
-                  color="gray"
-                  mb="lg"
-                  title={
-                    overview.legacy
-                      ? "检测到旧版日志，页面不会自动迁移"
-                      : "尚未创建观察数据库"
-                  }
-                >
-                  {overview.legacy
-                    ? "请先使用观察 CLI 完成迁移，再刷新此页。"
-                    : "启用观察并产生记录后，会在这里显示。页面本身不会创建数据库或生成数据。"}
-                </Alert>
-              )}
-              <div className="stats">
-                <Stat label="概念集合" value={overview.counts.collections} />
-                <Stat label="决策预演" value={overview.counts.previews} />
-                <Stat label="关键文件版本" value={overview.counts.versions} />
-                <Paper className="last-event" p="md">
-                  <Text size="xs" c="dimmed">
-                    最近一条观察事件
-                  </Text>
-                  <Text size="sm" fw={500} mt="xs">
-                    {overview.last_event
-                      ? date(overview.last_event)
-                      : "暂无记录"}
-                  </Text>
-                  <Text size="xs" c="dimmed" mt={4}>
-                    北京时间 · 共 {overview.counts.events} 条事件
-                  </Text>
-                </Paper>
-              </div>
-              <section className="content" key={page}>
-                {page === "collections" ? (
-                  <Collections revision={revision} />
-                ) : page === "decisions" ? (
-                  <Decisions revision={revision} />
-                ) : (
-                  <Versions overview={overview} revision={revision} />
-                )}
-              </section>
-            </>
-          )}
-        </State>
-        <footer>
-          本地 SQLite 与归档快照 · 观察记录说明行为，不能单独证明因果
-        </footer>
+        {page === "logs" ? (
+          <section className="content">
+            <Logs revision={revision} />
+          </section>
+        ) : (
+          <Observation page={page} revision={revision} />
+        )}
       </main>
     </div>
   );

@@ -7,9 +7,12 @@ import {
   integer,
   requestError,
 } from "./concept-system/observer-read.mjs";
+import { DSH_HOME } from "./paths.mjs";
+import { readActivity, readDiary } from "./observer-logs.mjs";
 const assets = fileURLToPath(new URL("../observer-ui/dist/", import.meta.url));
 export async function startObserverServer({
   directory,
+  logDirectory = DSH_HOME,
   port = 0,
   assetDirectory = assets,
 } = {}) {
@@ -18,7 +21,7 @@ export async function startObserverServer({
   if (!fs.existsSync(path.join(assetDirectory, "index.html")))
     throw Error("观察页面尚未构建，请先运行 npm run build:observer");
   const reader = new ObserverReader(directory);
-  const server = http.createServer((req, res) => {
+  const server = http.createServer(async (req, res) => {
     res.setHeader("Cache-Control", "no-store");
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("Referrer-Policy", "no-referrer");
@@ -56,7 +59,19 @@ export async function startObserverServer({
         return value;
       };
       let out;
-      if (url.pathname === "/api/overview") out = reader.overview();
+      if (
+        url.pathname === "/api/logs/diary" ||
+        url.pathname === "/api/logs/activity"
+      ) {
+        if (req.headers["sec-fetch-site"] === "same-site")
+          throw requestError("仅允许本机同源访问", 403);
+        out = url.pathname === "/api/logs/diary"
+          ? await readDiary(logDirectory, text("kind", "public"))
+          : await readActivity(logDirectory, {
+              page: number("page", 1, 1),
+              limit: number("limit", 20, 1, 100),
+            });
+      } else if (url.pathname === "/api/overview") out = reader.overview();
       else if (url.pathname === "/api/collections") {
         const subject = text("subject");
         if (subject && !["fish", "user"].includes(subject))

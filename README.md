@@ -387,7 +387,7 @@ sudo apt install ffmpeg    # Debian / Ubuntu
 
 ## 本地观察页面
 
-开发分支提供基于 React 和 Mantine 的只读页面：查看概念集合、决策过程，以及人格文件的历史差异。
+本地只读观察页面可查看鱼的活动日志、公开日记和私人日记，以及概念集合、决策过程和人格文件的历史差异。日志视图直接读取 `DSH_HOME` 下的日记与活动记录，无需观察数据库。
 
 ```bash
 # 在独立开发副本中构建，再启动本机页面
@@ -395,7 +395,7 @@ npm run build:observer
 node tools/bili.mjs observe serve
 ```
 
-终端打印随机空闲端口的访问地址，Ctrl+C 停止。页面不会自动创建数据库、迁移数据或改变学习状态。[完整使用与验证说明](docs/CONCEPT-SYSTEM-V1.md#mantine-本地观察页面)。
+终端打印随机空闲端口的访问地址。点击侧栏「鱼的日志」，或在访问地址末尾加上 `?page=logs` 直达。点击「刷新记录」即可读取最新内容，Ctrl+C 停止服务。页面不会自动创建数据库、迁移数据或改变学习状态。[完整使用与验证说明](docs/CONCEPT-SYSTEM-V1.md#mantine-本地观察页面)。
 
 ## 测试（v0.4.0 起自带）
 

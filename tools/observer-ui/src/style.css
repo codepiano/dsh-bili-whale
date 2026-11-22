@@ -401,3 +401,55 @@ footer {
     gap: 10px;
   }
 }
+
+.activity-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.activity-entry {
+  display: grid;
+  grid-template-columns: 11rem minmax(0, 1fr);
+  align-items: baseline;
+  gap: 0.75rem 1rem;
+  padding: 1rem 1.25rem;
+}
+.activity-entry + .activity-entry {
+  border-top: 1px solid #edf1f0;
+}
+.activity-entry time {
+  color: #64747c;
+  font-size: 0.8125rem;
+  font-variant-numeric: tabular-nums;
+}
+.diary-paper {
+  max-width: 72rem;
+}
+.diary-prose {
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+.diary-prose h2,
+.diary-prose h3 {
+  color: #2b4548;
+  line-height: 1.35;
+}
+.diary-prose pre,
+.diary-table {
+  overflow: auto;
+}
+.diary-prose table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+.diary-prose th,
+.diary-prose td {
+  border-bottom: 1px solid #e4eaed;
+  padding: 0.625rem 0.75rem;
+  text-align: start;
+  vertical-align: top;
+}
+.diary-prose th {
+  background: #f1f6f4;
+}
