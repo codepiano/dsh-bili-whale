@@ -17,7 +17,7 @@ export function windowsOf(cfg) {
   return list.map(w => {
     const start = parse(w.start), rawEnd = parse(w.end)
     const end = rawEnd <= start ? rawEnd + 1440 : rawEnd
-    return { start, end, wrap: end > 1440, label: `${w.start}–${w.end}`, wakes: Math.min(12, Math.max(0, Math.floor(Number(w.wakes ?? 1) || 0))) }
+    return { start, end, wakeAtStart: w.wakeAtStart === true, wrap: end > 1440, label: `${w.start}–${w.end}`, wakes: Math.min(12, Math.max(0, Math.floor(Number(w.wakes ?? 1) || 0))) }
   })
 }
 export const maxWakes = cfg => Math.min(12, windowsOf(cfg).reduce((n, w) => n + w.wakes, 0))
@@ -91,7 +91,10 @@ export function makePlan(cfg, state = {}, now = Date.now(), random = Math.random
   if (!picked) return done('今天可用窗口里已经排不下下一次（间隔不够）')
   const w = picked.cand
   const from = picked.earliest
-  const atMs = from + Math.floor(random() * Math.max(1, w.endsAt - from))
+  const firstWake = !(history.usedCount[w.key] ?? 0)
+  const atMs = w.wakeAtStart && firstWake
+    ? Math.max(w.startsAt, lastWoke + minGapMs)
+    : from + Math.floor(random() * Math.max(1, w.endsAt - from))
   const atDate = new Date(atMs), at = atDate.getHours() * 60 + atDate.getMinutes()
   const skip = random() < Math.min(1, Math.max(0, Number(cfg.skipChance ?? 0.3)))
   return { ...history, action: skip ? 'skip' : 'wake', fired: false, atMs, at,

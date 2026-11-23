@@ -10,6 +10,18 @@ test('next-day 00:30 remains next-day 00:30', () => {
   const p=makePlan(night,{},time('21T22:00:00'),random(.75,.9))
   assert.equal(p.atMs,time('22T00:30:00'))
 })
+test('fixed window starts at 11:00 and allows delayed delivery before expiry', () => {
+  const c = cfg([{start:'11:00', end:'11:15', wakes:1, wakeAtStart:true}])
+  const start = time('21T11:00:00')
+  const late = time('21T11:03:00')
+  const planned = makePlan(c, {}, time('21T09:00:00'), random(.99))
+  assert.equal(planned.atMs, start)
+  assert.equal(makePlan(c, {}, late, random(.99)).atMs, start)
+  assert.equal(makePlan(c, planned, late).atMs, start)
+  assert.equal(makePlan(c, completePlan(planned, late), late).action, 'done')
+  assert.equal(makePlan(c, planned, time('21T11:15:00')).action, 'done')
+  assert.equal(makePlan(c, planned, time('22T09:00:00')).atMs, time('22T11:00:00'))
+})
 test('pending skip is stable without any further random draws', () => {
   const c=cfg([{start:'20:00',end:'24:00',wakes:1}],.3)
   const p=makePlan(c,{},time('21T20:00:00'),random(.5,.1))
