@@ -3,6 +3,12 @@ import { open } from "node:fs/promises";
 import path from "node:path";
 import { requestError } from "./concept-system/observer-read.mjs";
 
+const dayFormat = new Intl.DateTimeFormat("sv-SE", {
+  timeZone: "Asia/Shanghai",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
 const diaryFiles = new Map([
   ["public", "whale-diary.md"],
   ["private", "whale-diary-private.md"],
@@ -35,7 +41,7 @@ export async function readDiary(directory, kind) {
   return { diary: await readLog(directory, file) };
 }
 
-export async function readActivity(directory, { page, limit }) {
+export async function readActivity(directory, { page, limit, timeline }) {
   const log = await readLog(directory, "whale-log.jsonl");
   const events = [];
   let skipped = 0;
@@ -62,14 +68,42 @@ export async function readActivity(directory, { page, limit }) {
       skipped++;
     }
   }
-  const pages = Math.max(1, Math.ceil(events.length / limit));
-  const current = Math.min(page, pages);
-  const end = events.length - (current - 1) * limit;
+  if (!timeline) return { ...paginate(events.reverse(), page, limit), skipped };
+  const kinds = new Set();
+  const days = new Set();
+  const query = timeline.query.trim().toLowerCase();
+  const items = [];
+  for (const event of events.reverse()) {
+    const day = dayFormat.format(new Date(event.at));
+    kinds.add(event.kind);
+    days.add(day);
+    if (timeline.day && day !== timeline.day) continue;
+    if (timeline.kind && event.kind !== timeline.kind) continue;
+    if (
+      query &&
+      ![event.kind, event.target, event.note].some((field) =>
+        field?.toLowerCase().includes(query),
+      )
+    ) continue;
+    items.push({ ...event, day });
+  }
+  items.sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
   return {
-    items: events.slice(Math.max(0, end - limit), end).reverse(),
-    total: events.length,
+    ...paginate(items, page, limit),
+    skipped,
+    kinds: [...kinds].sort(),
+    days: [...days].sort().reverse(),
+  };
+}
+
+function paginate(items, page, limit) {
+  const pages = Math.max(1, Math.ceil(items.length / limit));
+  const current = Math.min(page, pages);
+  const start = (current - 1) * limit;
+  return {
+    items: items.slice(start, start + limit),
+    total: items.length,
     page: current,
     pages,
-    skipped,
   };
 }

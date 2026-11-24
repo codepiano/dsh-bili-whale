@@ -44,6 +44,7 @@ import {
 import "@mantine/core/styles.css";
 import "./style.css";
 import { lineChanges, displayContent } from "./diff.mjs";
+import { indexDiary } from "./diary-index.mjs";
 const roles = {
   persona: "人格文件",
   personal_rendered: "学习倾向注入",
@@ -119,7 +120,7 @@ async function api(url, signal) {
   if (!res.ok) throw Error(body.error || "读取失败");
   return body;
 }
-function useData(url, revision = 0) {
+function useData(url, revision = 0, retain = false) {
   const [attempt, retry] = useState(0);
   const [state, set] = useState({ loading: true, data: null, error: null });
   useEffect(() => {
@@ -128,15 +129,25 @@ function useData(url, revision = 0) {
       return;
     }
     const abort = new AbortController();
-    set({ loading: true, data: null, error: null });
+    set((previous) => ({
+      loading: true,
+      data: retain ? previous.data : null,
+      error: null,
+    }));
     api(url, abort.signal)
-      .then((data) => set({ loading: false, data, error: null }))
+      .then((data) => {
+        if (!abort.signal.aborted) set({ loading: false, data, error: null });
+      })
       .catch((e) => {
-        if (e.name !== "AbortError")
-          set({ loading: false, data: null, error: e.message });
+        if (!abort.signal.aborted)
+          set((previous) => ({
+            loading: false,
+            data: retain ? previous.data : null,
+            error: e.message,
+          }));
       });
     return () => abort.abort();
-  }, [url, revision, attempt]);
+  }, [url, revision, attempt, retain]);
   return { ...state, retry: () => retry((n) => n + 1) };
 }
 function State({ state, children }) {
@@ -1218,30 +1229,124 @@ const markdownComponents = {
   ),
 };
 
-function Diary({ kind, revision }) {
-  const state = useData("/api/logs/diary?" + params({ kind }), revision);
+const logDayFormat = new Intl.DateTimeFormat("zh-CN", {
+  timeZone: "UTC",
+  year: "numeric",
+  month: "long",
+  day: "numeric",
+  weekday: "short",
+});
+const logTimeFormat = new Intl.DateTimeFormat("zh-CN", {
+  timeZone: "Asia/Shanghai",
+  hour: "2-digit",
+  minute: "2-digit",
+  hourCycle: "h23",
+});
+const activityLabels = new Map([
+  ["event", "一般记录"],
+  ["watch", "观看"],
+  ["read", "阅读"],
+  ["fav", "收藏"],
+  ["share", "分享"],
+  ["comment", "评论"],
+  ["night-skip", "跳过夜间任务"],
+]);
+const activityLabel = (kind) => activityLabels.get(kind) ?? kind;
+const logDay = (day) =>
+  day ? logDayFormat.format(new Date(day + "T00:00:00Z")) : "未标日期";
+
+function LogSearch({ label, placeholder, value, onChange, disabled }) {
   return (
-    <State state={state}>
-      {({ diary }) =>
-        diary?.content.trim() ? (
-          <Paper className="diary-paper" withBorder radius="md" p="xl">
-            <Text size="xs" c="dimmed">
-              更新于{" "}
-              <time dateTime={diary.updatedAt}>
-                {logDate.format(new Date(diary.updatedAt))}
-              </time>{" "}
-              · 北京时间
-            </Text>
-            <article className="diary-prose">
-              <Markdown
-                remarkPlugins={[remarkGfm]}
-                components={markdownComponents}
-                skipHtml
-              >
-                {diary.content}
-              </Markdown>
-            </article>
-          </Paper>
+    <TextInput
+      label={label}
+      placeholder={placeholder}
+      type="search"
+      autoComplete="off"
+      spellCheck={false}
+      maxLength={300}
+      value={value}
+      disabled={disabled}
+      leftSection={<IconSearch size={16} aria-hidden="true" />}
+      onChange={(event) => onChange(event.currentTarget.value)}
+    />
+  );
+}
+
+function Diary({ kind, revision }) {
+  const state = useData("/api/logs/diary?" + params({ kind }), revision, true);
+  const [search, setSearch] = useState("");
+  const [selected, setSelected] = useState(null);
+  const diary = state.data?.diary;
+  const content = diary?.content ?? "";
+  const entries = useMemo(() => indexDiary(content), [content]);
+  const query = search.trim().toLowerCase();
+  const visible = entries.filter(({ key, content }) =>
+    content.toLowerCase().includes(query) || logDay(key).includes(query),
+  );
+  const full = selected === "full" && !query;
+  const active = visible.find((entry) => entry.key === selected) ?? visible[0];
+  const hasArchive = entries.some((entry) => entry.key);
+  return (
+    <State state={{ ...state, loading: state.loading && !state.data }}>
+      {() =>
+        entries.length ? (
+          <div className="diary-layout" aria-busy={state.loading}>
+            <Paper component="aside" withBorder className="diary-archive" aria-label="日记目录">
+              <search aria-label="搜索日记">
+                <LogSearch
+                  label="搜索日记"
+                  placeholder="日期或正文关键词"
+                  value={search}
+                  onChange={(value) => {
+                    setSearch(value);
+                    setSelected(null);
+                  }}
+                />
+              </search>
+              <Text size="sm" c="dimmed" className="diary-result-count" role="status">
+                {query ? `找到 ${visible.length} 篇` : `共 ${entries.length} 篇`}
+              </Text>
+              {hasArchive && (
+                <ul className="diary-days" role="list">
+                  {visible.map(({ key }) => (
+                    <li key={key}>
+                      <button
+                        type="button"
+                        className="diary-day"
+                        aria-pressed={!full && active?.key === key}
+                        onClick={() => setSelected(key)}
+                      >
+                        {logDay(key)}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {hasArchive && !query && (
+                <Button type="button" variant="subtle" fullWidth onClick={() => setSelected("full")} aria-pressed={full}>
+                  查看全文
+                </Button>
+              )}
+            </Paper>
+            {full || active ? (
+              <Paper className="diary-paper" withBorder>
+                <Text size="xs" c="dimmed">
+                  更新于{" "}
+                  <time dateTime={diary.updatedAt}>
+                    {logDate.format(new Date(diary.updatedAt))}
+                  </time>{" "}
+                  · 北京时间
+                </Text>
+                <article className="diary-prose" aria-label={full ? "日记全文" : logDay(active.key)}>
+                  <Markdown remarkPlugins={[remarkGfm]} components={markdownComponents} skipHtml>
+                    {full ? content : active.content}
+                  </Markdown>
+                </article>
+              </Paper>
+            ) : (
+              <Empty title="没有匹配的日记" text="试试其他日期或关键词。" />
+            )}
+          </div>
         ) : (
           <Empty title="这本日记还是空的" text="鱼写下内容后，刷新即可查看。" />
         )
@@ -1250,51 +1355,165 @@ function Diary({ kind, revision }) {
   );
 }
 
+function ActivityTarget({ target }) {
+  if (!target) return null;
+  if (!/^BV[0-9A-Za-z]{10}$/.test(target))
+    return <Text fw={600} size="sm">{target}</Text>;
+  return (
+    <Text
+      component="a"
+      className="activity-video-link"
+      href={`https://www.bilibili.com/video/${target}/`}
+      target="_blank"
+      rel="noopener noreferrer"
+      fw={600}
+      size="sm"
+    >
+      {target}
+      <IconArrowUpRight size={14} aria-hidden="true" />
+    </Text>
+  );
+}
+
+function ActivityTimeline({ items }) {
+  const groups = new Map();
+  for (const item of items) {
+    if (!groups.has(item.day)) groups.set(item.day, []);
+    groups.get(item.day).push(item);
+  }
+  return (
+    <div className="activity-timeline">
+      {[...groups].map(([day, records]) => (
+        <section key={day} className="activity-day">
+          <Title order={2} size="h4" className="activity-day-label">
+            <time dateTime={day}>{logDay(day)}</time>
+          </Title>
+          <Paper withBorder>
+            <ol className="activity-list" role="list">
+              {records.map(({ at, kind, target, note }, index) => (
+                <li key={index} className="activity-entry">
+                  <time dateTime={at}>{logTimeFormat.format(new Date(at))}</time>
+                  <div className="activity-body">
+                    <div className="activity-title">
+                      <span className="activity-kind">{activityLabel(kind)}</span>
+                      <ActivityTarget target={target} />
+                    </div>
+                    {note && <Text className="wrap" size="sm" mt={6}>{note}</Text>}
+                  </div>
+                </li>
+              ))}
+            </ol>
+          </Paper>
+        </section>
+      ))}
+    </div>
+  );
+}
+
+function filterOptions(current, values = []) {
+  return current && !values.includes(current) ? [current, ...values] : values;
+}
+
 function Activity({ revision }) {
   const [page, setPage] = useState(1);
-  const state = useData("/api/logs/activity?" + params({ page }), revision);
+  const [day, setDay] = useState("");
+  const [kind, setKind] = useState("");
+  const [search, setSearch] = useState("");
+  const [query] = useDebouncedValue(search.trim(), 200);
+  const filtered = Boolean(day || kind || search.trim());
+  const url = "/api/logs/activity?" +
+    params({ view: "timeline", page, day, kind, query });
+  const state = useData(url, revision, true);
+  const days = filterOptions(day, state.data?.days);
+  const kinds = filterOptions(kind, state.data?.kinds);
   return (
-    <State state={state}>
-      {(activity) => (
-        <Stack gap="md">
-          {activity.skipped > 0 && (
-            <Alert color="yellow">有 {activity.skipped} 条活动记录无法解析。</Alert>
-          )}
-          {activity.items.length ? (
-            <>
-              <Text size="sm" c="dimmed">
-                共 {activity.total} 条 · 最新记录在前 · 北京时间
-              </Text>
-              <Paper withBorder radius="md">
-                <ol className="activity-list" role="list">
-                  {activity.items.map(({ at, kind, target, note }, index) => (
-                    <li key={index} className="activity-entry">
-                      <time dateTime={at}>{logDate.format(new Date(at))}</time>
-                      <div className="wrap">
-                        <Text fw={650}>
-                          {kind}{target ? ` · ${target}` : ""}
-                        </Text>
-                        {note && <Text size="sm" mt={4}>{note}</Text>}
-                      </div>
-                    </li>
-                  ))}
-                </ol>
-              </Paper>
-              {activity.pages > 1 && (
-                <Pagination
-                  value={activity.page}
-                  onChange={setPage}
-                  total={activity.pages}
-                  getItemProps={(n) => ({ "aria-label": `第 ${n} 页` })}
+    <Stack gap="md">
+      <Paper withBorder p="md">
+        <search className="activity-filters" aria-label="筛选活动记录">
+          <LogSearch
+            label="搜索活动"
+            placeholder="视频编号或备注关键词"
+            value={search}
+            onChange={(value) => {
+              setSearch(value);
+              setPage(1);
+            }}
+          />
+          <NativeSelect
+            label="日期"
+            value={day}
+            disabled={!days.length}
+            data={[
+              { value: "", label: "全部日期" },
+              ...days.map((value) => ({ value, label: logDay(value) })),
+            ]}
+            onChange={(event) => {
+              setDay(event.currentTarget.value);
+              setPage(1);
+            }}
+          />
+          <NativeSelect
+            label="类型"
+            value={kind}
+            disabled={!kinds.length}
+            data={[
+              { value: "", label: "全部类型" },
+              ...kinds.map((value) => ({ value, label: activityLabel(value) })),
+            ]}
+            onChange={(event) => {
+              setKind(event.currentTarget.value);
+              setPage(1);
+            }}
+          />
+          <Button
+            type="button"
+            variant="default"
+            disabled={!filtered}
+            onClick={() => {
+              setDay("");
+              setKind("");
+              setSearch("");
+              setPage(1);
+            }}
+          >
+            清除筛选
+          </Button>
+        </search>
+      </Paper>
+      <div className="activity-results" aria-busy={state.loading || query !== search.trim()}>
+        <State state={{ ...state, loading: state.loading && !state.data }}>
+          {(activity) => (
+            <Stack gap="md">
+              <Group justify="space-between" gap="xs">
+                <Text size="sm" c="dimmed" role="status">
+                  {filtered ? "筛选结果" : "全部活动"} · {activity.total} 条 · 北京时间
+                </Text>
+                {activity.pages > 1 && (
+                  <Pagination
+                    size="sm"
+                    value={activity.page}
+                    onChange={setPage}
+                    total={activity.pages}
+                    getItemProps={(n) => ({ "aria-label": `第 ${n} 页` })}
+                  />
+                )}
+              </Group>
+              {activity.skipped > 0 && (
+                <Alert color="yellow">有 {activity.skipped} 条活动记录无法解析。</Alert>
+              )}
+              {activity.items.length ? (
+                <ActivityTimeline items={activity.items} />
+              ) : (
+                <Empty
+                  title={filtered ? "没有匹配的活动" : "还没有活动记录"}
+                  text={filtered ? "试试调整日期、类型或关键词。" : "鱼记录活动后，刷新即可查看。"}
                 />
               )}
-            </>
-          ) : (
-            <Empty title="还没有活动记录" text="鱼记录活动后，刷新即可查看。" />
+            </Stack>
           )}
-        </Stack>
-      )}
-    </State>
+        </State>
+      </div>
+    </Stack>
   );
 }
 
@@ -1322,7 +1541,6 @@ function Logs({ revision }) {
 const pages = {
   logs: {
     title: "鱼的日志",
-    sub: "回看鱼的活动记录和自己写下的日记。",
     icon: IconNotebook,
   },
   collections: {
@@ -1449,18 +1667,18 @@ function App() {
       <main className="main">
         <header className="page-header">
           <div>
-            <Group gap="sm">
-              <Text className="eyebrow">BILI WHALE</Text>
-              <Badge variant="outline" color="teal" size="sm">
-                只读
-              </Badge>
-            </Group>
-            <Title order={1} size={29} mt="sm">
+            {page !== "logs" && (
+              <Group gap="sm">
+                <Text className="eyebrow">BILI WHALE</Text>
+                <Badge variant="outline" color="teal" size="sm">只读</Badge>
+              </Group>
+            )}
+            <Title order={1} size={29} mt={page === "logs" ? 0 : "sm"}>
               {pages[page].title}
             </Title>
-            <Text size="sm" c="dimmed" mt={6}>
-              {pages[page].sub}
-            </Text>
+            {pages[page].sub && (
+              <Text size="sm" c="dimmed" mt={6}>{pages[page].sub}</Text>
+            )}
           </div>
           <Button
             leftSection={<IconRefresh size={16} />}

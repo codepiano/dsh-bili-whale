@@ -1,3 +1,4 @@
+import { indexDiary } from "../tools/observer-ui/src/diary-index.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -264,4 +265,54 @@ test("fish logs read live diary files and page activity without an observation d
   assert.equal((await fetch(server.url + "/api/logs/diary?kind=private", {
     headers: { "Sec-Fetch-Site": "same-site" },
   })).status, 403);
+});
+
+test("timeline groups and filters by Beijing date before pagination", async (t) => {
+  const root = box(t);
+  const server = await start(t, root);
+  const events = [
+    { at: "2026-11-23T16:03:00Z", kind: "watch", target: "BV123", note: "最新" },
+    { at: "2026-11-23T15:59:00Z", kind: "watch", target: "BV123", note: "昨天" },
+    { at: "2026-11-23T17:00:00Z", kind: "share", target: null, note: "分享" },
+    { at: "2026-11-23T16:01:00Z", kind: "watch", target: "BV123", note: "较早" },
+  ];
+  fs.writeFileSync(path.join(root, "whale-log.jsonl"), events.map((event) => JSON.stringify(event)).join("\n"));
+  const get = async (parameters) => {
+    const query = new URLSearchParams({ view: "timeline", ...parameters });
+    const response = await fetch(server.url + "/api/logs/activity?" + query);
+    assert.equal(response.status, 200);
+    return response.json();
+  };
+  const first = await get({ day: "2026-11-24", kind: "watch", query: " bv123 ", limit: 1 });
+  assert.deepEqual(first.items, [{ ...events[0], day: "2026-11-24" }]);
+  assert.deepEqual(first.days, ["2026-11-24", "2026-11-23"]);
+  assert.deepEqual(first.kinds, ["share", "watch"]);
+  assert.equal(first.total, 2);
+  assert.equal(first.pages, 2);
+  const second = await get({ day: "2026-11-24", kind: "watch", limit: 1, page: 2 });
+  assert.deepEqual(second.items, [{ ...events[3], day: "2026-11-24" }]);
+  assert.equal((await get({ query: "昨天", day: "2026-11-24" })).total, 0);
+});
+
+test("dated diary index preserves duplicate dates, fenced text and undated entries", () => {
+  const diary = [
+    "# 旧格式",
+    "未标日期",
+    "# 鱼 · 2026-11-22",
+    "## 小节",
+    '~~~md',
+    "# 样例 · 2026-12-01",
+    '~~~',
+    "# 鱼 · 2026-11-23",
+    "新的一天",
+    "# 鱼 · 2026-11-22 （补记）",
+    "补记正文",
+  ].join("\r\n");
+  const entries = indexDiary(diary);
+  assert.deepEqual(entries.map((entry) => entry.key), ["2026-11-23", "2026-11-22", ""]);
+  assert.match(entries[1].content, /样例 · 2026-12-01/);
+  assert.match(entries[1].content, /补记正文/);
+  assert.match(entries[2].content, /未标日期/);
+  assert.deepEqual(indexDiary("## 旧日记\n正文"), [{ key: "", content: "## 旧日记\n正文" }]);
+  assert.deepEqual(indexDiary(" 	"), []);
 });

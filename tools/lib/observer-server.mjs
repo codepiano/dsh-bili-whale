@@ -70,6 +70,9 @@ export async function startObserverServer({
           : await readActivity(logDirectory, {
               page: number("page", 1, 1),
               limit: number("limit", 20, 1, 100),
+              timeline: q.get("view") === "timeline"
+                ? { day: text("day"), kind: text("kind"), query: text("query") }
+                : undefined,
             });
       } else if (url.pathname === "/api/overview") out = reader.overview();
       else if (url.pathname === "/api/collections") {
