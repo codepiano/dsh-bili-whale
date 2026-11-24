@@ -37,7 +37,7 @@ export function indexDiary(content) {
     .map(([key, sections]) => ({ key, content: sections.join("\n\n") }));
 }
 
-function validDay(day) {
+export function validDay(day) {
   const date = new Date(day + "T00:00:00Z");
   return Number.isFinite(date.valueOf()) && date.toISOString().slice(0, 10) === day;
 }

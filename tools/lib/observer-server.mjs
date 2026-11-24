@@ -9,6 +9,8 @@ import {
 } from "./concept-system/observer-read.mjs";
 import { DSH_HOME } from "./paths.mjs";
 import { readActivity, readDiary } from "./observer-logs.mjs";
+import { diaryReadings, listReadings, readingKinds, readingPage } from "./observer-readings.mjs";
+import { validDay } from "./diary-index.mjs";
 const assets = fileURLToPath(new URL("../observer-ui/dist/", import.meta.url));
 export async function startObserverServer({
   directory,
@@ -74,6 +76,41 @@ export async function startObserverServer({
                 ? { day: text("day"), kind: text("kind"), query: text("query") }
                 : undefined,
             });
+      } else if (["/api/readings", "/api/readings/text", "/api/readings/related"].includes(url.pathname)) {
+        if (req.headers["sec-fetch-site"] === "same-site")
+          throw requestError("仅允许本机同源访问", 403);
+        if (url.pathname === "/api/readings/text") {
+          const id = text("id");
+          if (!/^[a-zA-Z0-9-]{1,128}$/.test(id)) throw requestError("阅读标识不正确");
+          const page = number("page", 1, 1);
+          out = reader.use(
+            (db) => readingPage(db, reader.store, id, page),
+            () => { throw requestError("没有阅读归档", 404); },
+          );
+        } else {
+          const day = text("day");
+          if (day && !validDay(day)) throw requestError("日期不正确");
+          if (url.pathname === "/api/readings/related") {
+            const { diary } = await readDiary(logDirectory, text("diary", "public"));
+            const empty = { mentioned: [], sameDay: [], sameDayCount: 0 };
+            out = diary && day ? reader.use(
+              (db) => diaryReadings(db, reader.store, { day, content: diary.content }),
+              empty,
+            ) : empty;
+          } else {
+            const kind = text("kind");
+            if (kind && !readingKinds.includes(kind)) throw requestError("阅读类型不正确");
+            const options = {
+              query: text("query"), day, kind,
+              page: number("page", 1, 1),
+              limit: number("limit", 16, 1, 50),
+            };
+            out = reader.use(
+              (db) => listReadings(db, reader.store, options),
+              { items: [], total: 0, page: 1, pages: 1 },
+            );
+          }
+        }
       } else if (url.pathname === "/api/overview") out = reader.overview();
       else if (url.pathname === "/api/collections") {
         const subject = text("subject");

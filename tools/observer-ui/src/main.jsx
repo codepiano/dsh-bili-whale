@@ -16,7 +16,6 @@ import {
   TextInput,
   Drawer,
   Table,
-  Loader,
   Alert,
   Pagination,
   Accordion,
@@ -34,17 +33,20 @@ import {
   IconRoute,
   IconHistory,
   IconNotebook,
+  IconBook2,
   IconRefresh,
   IconArrowUpRight,
   IconLock,
   IconSearch,
   IconArrowRight,
-  IconAlertCircle,
 } from "@tabler/icons-react";
 import "@mantine/core/styles.css";
 import "./style.css";
 import { lineChanges, displayContent } from "./diff.mjs";
-import { indexDiary } from "./diary-index.mjs";
+import { params, useData, State, Empty } from "./data.jsx";
+import { markdownComponents } from "./markdown.jsx";
+import { Readings, DiaryReadingLinks } from "./readings.jsx";
+import { indexDiary, validDay } from "../../lib/diary-index.mjs";
 const roles = {
   persona: "人格文件",
   personal_rendered: "学习倾向注入",
@@ -103,102 +105,6 @@ const date = (x) => {
       }).format(d);
 };
 const num = (x) => (Number.isFinite(x) ? x.toFixed(3) : "—");
-const params = (values) =>
-  new URLSearchParams(
-    Object.entries(values).filter(
-      ([, v]) => v !== null && v !== undefined && v !== "",
-    ),
-  ).toString();
-async function api(url, signal) {
-  const res = await fetch(url, { signal });
-  let body;
-  try {
-    body = await res.json();
-  } catch {
-    throw Error("服务返回了无法读取的响应");
-  }
-  if (!res.ok) throw Error(body.error || "读取失败");
-  return body;
-}
-function useData(url, revision = 0, retain = false) {
-  const [attempt, retry] = useState(0);
-  const [state, set] = useState({ loading: true, data: null, error: null });
-  useEffect(() => {
-    if (!url) {
-      set({ loading: false, data: null, error: null });
-      return;
-    }
-    const abort = new AbortController();
-    set((previous) => ({
-      loading: true,
-      data: retain ? previous.data : null,
-      error: null,
-    }));
-    api(url, abort.signal)
-      .then((data) => {
-        if (!abort.signal.aborted) set({ loading: false, data, error: null });
-      })
-      .catch((e) => {
-        if (!abort.signal.aborted)
-          set((previous) => ({
-            loading: false,
-            data: retain ? previous.data : null,
-            error: e.message,
-          }));
-      });
-    return () => abort.abort();
-  }, [url, revision, attempt, retain]);
-  return { ...state, retry: () => retry((n) => n + 1) };
-}
-function State({ state, children }) {
-  if (state.loading)
-    return (
-      <div className="state">
-        <Loader size="sm" />
-        <Text c="dimmed" size="sm">
-          正在读取本地记录
-        </Text>
-      </div>
-    );
-  if (state.error)
-    return (
-      <Alert
-        color="red"
-        icon={<IconAlertCircle size={18} />}
-        title="读取未完成"
-      >
-        {state.error}
-        <div>
-          <Button
-            mt="sm"
-            size="xs"
-            variant="light"
-            color="red"
-            onClick={state.retry}
-          >
-            重试读取
-          </Button>
-        </div>
-      </Alert>
-    );
-  return children(state.data);
-}
-function Empty({
-  title = "还没有记录",
-  text = "此页面只读展示已有数据，不会生成或修改记录。",
-}) {
-  return (
-    <div className="empty">
-      <IconCirclesRelation size={30} stroke={1.2} />
-      <Title order={3} size="h4" mt="md">
-        {title}
-      </Title>
-      <Text c="dimmed" size="sm" mt="xs">
-        {text}
-      </Text>
-    </div>
-  );
-}
 function Stat({ label, value }) {
   return (
     <Paper className="stat" withBorder radius="md" p="md">
@@ -1210,25 +1116,6 @@ const logDate = new Intl.DateTimeFormat("zh-CN", {
   timeStyle: "medium",
 });
 
-const markdownComponents = {
-  h1: ({ children }) => <h2>{children}</h2>,
-  a: ({ href, children }) => {
-    if (href?.startsWith("#")) return <a href={href}>{children}</a>;
-    if (!/^https?:\/\//i.test(href ?? "")) return <span>{children}</span>;
-    return (
-      <a href={href} target="_blank" rel="noopener noreferrer">
-        {children}
-      </a>
-    );
-  },
-  img: ({ alt }) => (alt ? <span>{alt}</span> : null),
-  table: ({ children }) => (
-    <div className="diary-table">
-      <table>{children}</table>
-    </div>
-  ),
-};
-
 const logDayFormat = new Intl.DateTimeFormat("zh-CN", {
   timeZone: "UTC",
   year: "numeric",
@@ -1272,10 +1159,10 @@ function LogSearch({ label, placeholder, value, onChange, disabled }) {
   );
 }
 
-function Diary({ kind, revision }) {
+function Diary({ kind, revision, initialDay }) {
   const state = useData("/api/logs/diary?" + params({ kind }), revision, true);
   const [search, setSearch] = useState("");
-  const [selected, setSelected] = useState(null);
+  const [selected, setSelected] = useState(initialDay);
   const diary = state.data?.diary;
   const content = diary?.content ?? "";
   const entries = useMemo(() => indexDiary(content), [content]);
@@ -1284,7 +1171,7 @@ function Diary({ kind, revision }) {
     content.toLowerCase().includes(query) || logDay(key).includes(query),
   );
   const full = selected === "full" && !query;
-  const active = visible.find((entry) => entry.key === selected) ?? visible[0];
+  const active = selected === null ? visible[0] : visible.find((entry) => entry.key === selected);
   const hasArchive = entries.some((entry) => entry.key);
   return (
     <State state={{ ...state, loading: state.loading && !state.data }}>
@@ -1342,9 +1229,15 @@ function Diary({ kind, revision }) {
                     {full ? content : active.content}
                   </Markdown>
                 </article>
+                {!full && active.key && (
+                  <DiaryReadingLinks key={active.key} day={active.key} diary={kind} revision={revision} />
+                )}
               </Paper>
             ) : (
-              <Empty title="没有匹配的日记" text="试试其他日期或关键词。" />
+              <Empty
+                title={query ? "没有匹配的日记" : "这一天没有日记"}
+                text={query ? "试试其他日期或关键词。" : "可以从目录选择其他日期。"}
+              />
             )}
           </div>
         ) : (
@@ -1518,8 +1411,12 @@ function Activity({ revision }) {
 }
 
 function Logs({ revision }) {
+  const route = new URLSearchParams(window.location.search);
+  const tab = route.get("tab");
+  const day = route.get("day");
+  const diaryTab = tab === "public" || tab === "private";
   return (
-    <Tabs defaultValue="activity" keepMounted={false}>
+    <Tabs defaultValue={diaryTab ? tab : "activity"} keepMounted={false}>
       <Tabs.List aria-label="日志类型" mb="lg">
         <Tabs.Tab value="activity">活动日志</Tabs.Tab>
         <Tabs.Tab value="public">公开日记</Tabs.Tab>
@@ -1529,10 +1426,10 @@ function Logs({ revision }) {
         <Activity revision={revision} />
       </Tabs.Panel>
       <Tabs.Panel value="public">
-        <Diary kind="public" revision={revision} />
+        <Diary kind="public" revision={revision} initialDay={tab === "public" && day && validDay(day) ? day : null} />
       </Tabs.Panel>
       <Tabs.Panel value="private">
-        <Diary kind="private" revision={revision} />
+        <Diary kind="private" revision={revision} initialDay={tab === "private" && day && validDay(day) ? day : null} />
       </Tabs.Panel>
     </Tabs>
   );
@@ -1543,6 +1440,7 @@ const pages = {
     title: "鱼的日志",
     icon: IconNotebook,
   },
+  readings: { title: "阅读原文", icon: IconBook2 },
   collections: {
     title: "概念集合",
     sub: "查看观点、兴趣与表达素材怎样积累，保留每个成员的来历。",
@@ -1618,12 +1516,9 @@ function Observation({ page, revision }) {
   );
 }
 function App() {
-  const [page, setPage] = useState(() =>
-      new URLSearchParams(window.location.search).get("page") === "logs"
-        ? "logs"
-        : "collections",
-    ),
-    [revision, setRevision] = useState(0);
+  const requested = new URLSearchParams(window.location.search).get("page");
+  const page = Object.hasOwn(pages, requested) ? requested : "collections";
+  const [revision, setRevision] = useState(0);
   return (
     <div className="shell">
       <aside className="sidebar">
@@ -1641,18 +1536,15 @@ function App() {
         <Text className="nav-caption">观察记录</Text>
         <nav>
           {Object.entries(pages).map(([key, p]) => (
-            <button
+            <a
               className={"nav-item " + (page === key ? "active" : "")}
               key={key}
-              onClick={() => {
-                setPage(key);
-                window.scrollTo({ top: 0 });
-              }}
+              href={"?page=" + key}
               aria-current={page === key ? "page" : undefined}
             >
               <p.icon size={19} stroke={1.6} />
               <span>{p.title}</span>
-            </button>
+            </a>
           ))}
         </nav>
         <div className="sidebar-note">
@@ -1667,13 +1559,13 @@ function App() {
       <main className="main">
         <header className="page-header">
           <div>
-            {page !== "logs" && (
+            {page !== "logs" && page !== "readings" && (
               <Group gap="sm">
                 <Text className="eyebrow">BILI WHALE</Text>
                 <Badge variant="outline" color="teal" size="sm">只读</Badge>
               </Group>
             )}
-            <Title order={1} size={29} mt={page === "logs" ? 0 : "sm"}>
+            <Title order={1} size={29} mt={pages[page].sub ? "sm" : 0}>
               {pages[page].title}
             </Title>
             {pages[page].sub && (
@@ -1692,6 +1584,8 @@ function App() {
           <section className="content">
             <Logs revision={revision} />
           </section>
+        ) : page === "readings" ? (
+          <Readings revision={revision} />
         ) : (
           <Observation page={page} revision={revision} />
         )}

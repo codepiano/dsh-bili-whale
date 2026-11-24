@@ -1,4 +1,4 @@
-import { indexDiary } from "../tools/observer-ui/src/diary-index.mjs";
+import { indexDiary } from "../tools/lib/diary-index.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -315,4 +315,73 @@ test("dated diary index preserves duplicate dates, fenced text and undated entri
   assert.match(entries[2].content, /未标日期/);
   assert.deepEqual(indexDiary("## 旧日记\n正文"), [{ key: "", content: "## 旧日记\n正文" }]);
   assert.deepEqual(indexDiary(" 	"), []);
+});
+
+test("reading archive serves confirmed pages and associates diary mentions separately from same-day records", async (t) => {
+  const root = box(t);
+  const logs = box(t);
+  const { store } = await observerFixture(root);
+  const videoId = "11111111-1111-4111-a111-111111111111";
+  const webId = "22222222-2222-4222-a222-222222222222";
+  const pendingId = "33333333-3333-4333-a333-333333333333";
+  const bvid = "BV0000000001";
+  const title = "从字幕归档回顾潮汐带";
+  const pages = ["[0-1] 首段字幕", "[1-2] 第二页字幕"].map((excerpt) => ({
+    object: store.object({ excerpt }),
+  }));
+  const material = store.object({ title });
+  const web = {
+    id: webId,
+    title: "一篇观察潮汐变化的报道",
+    kind: "web_page",
+    status: "presented",
+    reading_complete: true,
+    read_completed_at: "2026-11-23T16:00:00Z",
+    url: "https://example.test/story",
+    sources: [{ object: store.object({ excerpt: "## 网页正文" }) }],
+  };
+  await store.transaction({}, (draft) => {
+    const video = {
+      id: videoId, bvid, title: undefined, material, kind: "subtitles",
+      status: "presented", reading_complete: true,
+      read_completed_at: "2026-11-23T16:20:00Z",
+      sources: pages,
+    };
+    draft.reads.put(video);
+    draft.reads.put({ ...video, id: pendingId, reading_complete: false });
+    draft.state.resource_reads = { [webId]: web };
+  });
+  fs.writeFileSync(path.join(logs, "whale-diary.md"),
+    `# 11 日记 2026-11-24\n\n今天记了《${title}》。\n\n# 旧日记 2026-11-23\n\n${bvid}`);
+  fs.writeFileSync(path.join(logs, "whale-diary-private.md"),
+    "# 私人日记 2026-11-24\n\n[来源](https://example.test/story#section)");
+  const before = store.read();
+  const server = await start(t, root, logs);
+  const get = async (path) => {
+    const response = await fetch(server.url + "/api/readings" + path);
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("cache-control"), "no-store");
+    return response.json();
+  };
+  const newest = await get("?day=2026-11-24&limit=1");
+  assert.equal(newest.total, 2);
+  assert.equal(newest.pages, 2);
+  assert.equal(newest.items[0].title, title);
+  assert.equal(newest.items[0].id, videoId);
+  assert.equal((await get("?day=2026-11-24&limit=1&page=2")).items[0].id, webId);
+  assert.equal((await get("?kind=subtitles&query=" + encodeURIComponent("字幕归档"))).total, 1);
+  assert.equal((await get("/text?id=" + videoId + "&page=2")).text, "[1-2] 第二页字幕");
+  assert.equal((await get("/text?id=" + webId)).text, "## 网页正文");
+  const related = await get("/related?diary=public&day=2026-11-24");
+  assert.deepEqual(related.mentioned.map((item) => item.id), [videoId]);
+  assert.deepEqual(related.sameDay.map((item) => item.id), [webId]);
+  const privateLinks = await get("/related?diary=private&day=2026-11-24");
+  assert.deepEqual(privateLinks.mentioned.map((item) => item.id), [webId]);
+  assert.deepEqual((await get("/related?diary=public&day=2026-11-23")).mentioned.map((item) => item.id), [videoId]);
+
+  for (const bad of ["/text?id=" + pendingId, "/text?id=" + videoId + "&page=3"])
+    assert.equal((await fetch(server.url + "/api/readings" + bad)).status, 404);
+  assert.equal((await fetch(server.url + "/api/readings?day=2026-02-30")).status, 400);
+  assert.equal((await fetch(server.url + "/api/readings", { headers: { "Sec-Fetch-Site": "same-site" } })).status, 403);
+  assert.deepEqual(store.read(), before);
 });

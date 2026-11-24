@@ -9,6 +9,8 @@ const dayFormat = new Intl.DateTimeFormat("sv-SE", {
   month: "2-digit",
   day: "2-digit",
 });
+export const beijingDay = (date) => dayFormat.format(date);
+
 const diaryFiles = new Map([
   ["public", "whale-diary.md"],
   ["private", "whale-diary-private.md"],
@@ -74,7 +76,7 @@ export async function readActivity(directory, { page, limit, timeline }) {
   const query = timeline.query.trim().toLowerCase();
   const items = [];
   for (const event of events.reverse()) {
-    const day = dayFormat.format(new Date(event.at));
+    const day = beijingDay(new Date(event.at));
     kinds.add(event.kind);
     days.add(day);
     if (timeline.day && day !== timeline.day) continue;

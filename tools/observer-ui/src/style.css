@@ -563,3 +563,147 @@ footer {
     max-height: 10rem;
   }
 }
+
+.nav-item {
+  text-decoration: none;
+}
+
+.reading-layout {
+  display: grid;
+  grid-template-columns: minmax(16.5rem, 21rem) minmax(0, 1fr);
+  align-items: start;
+  gap: clamp(0.875rem, 2vw, 1.5rem);
+}
+.reading-list,
+.reading-reader {
+  min-width: 0;
+  border-color: #dfe8e7;
+}
+.reading-list {
+  position: sticky;
+  top: 1rem;
+  padding: 1rem;
+}
+.reading-filter-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
+  gap: 0.625rem;
+  margin-block-start: 0.625rem;
+}
+.reading-list-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 2.75rem;
+}
+.reading-list-items,
+.diary-reading-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.reading-list-items {
+  max-height: min(53vh, 34rem);
+  overflow: auto;
+  scrollbar-gutter: stable;
+  margin-block-end: 0.75rem;
+}
+.reading-list-link {
+  display: grid;
+  gap: 0.375rem;
+  border-radius: 0.5rem;
+  padding: 0.625rem 0.75rem;
+  color: #243a40;
+  text-decoration: none;
+}
+.reading-list-link:hover {
+  background: #f1f6f4;
+}
+.reading-list-link[aria-current="page"] {
+  background: #e9f3ed;
+  box-shadow: inset 3px 0 #2a8a70;
+}
+.reading-list-link:focus-visible {
+  outline: 2px solid #2a8a70;
+  outline-offset: -2px;
+}
+.reading-list-title {
+  font-weight: 620;
+  font-size: 0.925rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.reading-meta {
+  font-size: 0.75rem;
+  color: #52676c;
+  font-variant-numeric: tabular-nums;
+}
+.reading-reader {
+  padding: clamp(1rem, 3vw, 2.5rem);
+  scroll-margin-block: 1rem;
+}
+.reading-header h2 {
+  margin-block: 0.7rem;
+  color: #263f42;
+  font-size: clamp(1.35rem, 2.1vw, 1.9rem);
+  overflow-wrap: anywhere;
+}
+.reading-header a,
+.diary-reading-links a {
+  color: #216f59;
+  text-underline-offset: 0.17em;
+}
+.reading-header a svg {
+  vertical-align: middle;
+}
+.reading-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding-block: 0.625rem;
+  margin-block: 1.125rem;
+  border-block: 1px solid #e5ecea;
+}
+.reading-prose {
+  max-width: 77ch;
+  line-height: 1.8;
+  overflow-wrap: anywhere;
+}
+.reading-text {
+  white-space: pre-wrap;
+}
+.reading-end {
+  border-block-start: 1px solid #e5ecea;
+  padding-block-start: 0.75rem;
+  margin-block-start: 1.75rem;
+}
+.reading-blank {
+  min-height: 12rem;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 0.75rem;
+  color: #52676c;
+}
+.diary-reading-links {
+  margin-block-start: 1.5rem;
+  padding-block-start: 1rem;
+  border-block-start: 1px solid #e2ebe7;
+}
+.diary-reading-list li {
+  padding-block: 0.375rem;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 900px) {
+  .reading-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .reading-list {
+    position: static;
+  }
+  .reading-list-items {
+    max-height: 18rem;
+  }
+}
