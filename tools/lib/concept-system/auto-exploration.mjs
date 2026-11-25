@@ -1,3 +1,4 @@
+import {resolveWake,savedFishSession} from './cycle-recovery.mjs'
 import {readingDomainRequest} from './reading-domain.mjs'
 import {WebExploration} from './web-exploration.mjs'
 import {readingBudget,recordCompletedRead,settleExplorationCycle} from './exploration-budget.mjs'
@@ -37,23 +38,35 @@ function finishRound(store, cycle, reason) {
 
 // Persistent orchestration is shared by every scheduled wake. The model supplies
 // evidence-based judgments and reflections; it cannot mark a page as delivered.
-export async function nextExploration(store,{cycle_id},{signal,feed=runFeed,readConfig=config}={}) {
+export async function nextExploration(store,{cycle_id},{signal,feed=runFeed,readConfig=config,sessionId=savedFishSession()}={}) {
   signal?.throwIfAborted()
   const cfgNow=readConfig()
   if(cfgNow.conceptSystem?.observe!==true||cfgNow.conceptSystem?.mode!=='active')return {status:'disabled',next_action:'legacy_feed',reason:'自动概念探索仅在 observe=true 且 active 时启用'}
-  // A later scheduled wake resumes its unfinished paid task instead of selecting
-  // another video and submitting another transcription.
-  const prior=Object.values(store.state().auto_exploration_cycles??{}).find(c=>c.status==='active'&&store.journal.use(db=>!!db.prepare("SELECT id FROM video_reads WHERE status!='failed' AND json_extract(payload,'$.audio_draft.hash') IS NOT NULL AND json_extract(payload,'$.feed.run_id')=? LIMIT 1").get(`${c.id}-r${c.round}`)))
-  if(prior&&prior.id!==cycle_id)return nextExploration(store,{cycle_id:prior.id},{signal,feed,readConfig})
-  let cycle=await store.transaction({},(d,emit)=>{
-    d.state.auto_exploration_cycles??={}
-    if(d.state.auto_exploration_cycles[cycle_id])return d.state.auto_exploration_cycles[cycle_id]
+  const cycle=await store.transaction({},(d,emit)=>{
+    const existing = resolveWake(d, emit, cycle_id, sessionId)
+    if (existing) return existing
     const cfg=readConfig(),n=Math.max(1,Math.min(20,Math.floor(Number(cfg.night?.maxVideos)||5)))
-    const result={id:cycle_id,round:1,max_rounds:3,n,per:2,pool:30,source:'search',search_source:cfg.night?.searchSource??'bilibili',completed_reads:[],round_limits:{1:n},status:'active',started_at:store.now()}
+    const result={id:cycle_id,session_id:sessionId,round:1,max_rounds:3,n,per:2,pool:30,source:'search',search_source:cfg.night?.searchSource??'bilibili',completed_reads:[],round_limits:{1:n},status:'active',started_at:store.now()}
     d.state.auto_exploration_cycles[cycle_id]=result
     emit('exploration.cycle_started',result,{source:'automatic_exploration'})
     return result
   })
+  const out = await advanceExploration(store, cycle.id, {signal, feed, readConfig})
+  if (out.next_action !== 'stop') {
+    const step = {round:out.round, status:out.status, next_action:out.next_action,
+      read_id:out.read_id ?? out.arguments?.read_id ?? null, decision_id:out.decision_id ?? null}
+    await store.transaction({}, d => {
+      const current = d.state.auto_exploration_cycles[cycle.id]
+      if (current.status === 'active' && current.round === step.round) current.checkpoint = step
+    })
+  }
+  return out
+}
+
+async function advanceExploration(store, cycle_id, {signal, feed, readConfig}) {
+  signal?.throwIfAborted()
+  const cfgNow = readConfig()
+  let cycle = store.state().auto_exploration_cycles[cycle_id]
   if(cycle.status!=='active')return cycle.result
   const run_id=`${cycle_id}-r${cycle.round}`,args={run_id,seed:run_id,n:cycle.round_limits?.[cycle.round]??cycle.n,per:cycle.per,pool:cycle.pool,source:cycle.source}
   const state=store.state(),pending=state.feed_judgments?.[run_id]??state.feed_searches?.[run_id]
@@ -65,14 +78,14 @@ export async function nextExploration(store,{cycle_id},{signal,feed=runFeed,read
       if(current.round===cycle.round){current.round++;current.round_limits??={};current.round_limits[current.round]=readingBudget(current).remaining;emit('exploration.cycle_continued',{cycle_id,previous_run_id:run_id,round:current.round,reason:'concept_state_changed_before_selection'},{source:'automatic_exploration'})}
       if(current.round>current.max_rounds)settleExplorationCycle(d,emit,cycle_id,'连续状态冲突，保留现场，下次作息继续','state_conflicts')
     })
-    return nextExploration(store,{cycle_id},{signal,feed,readConfig})
+    return advanceExploration(store,cycle_id,{signal,feed,readConfig})
   }
   if(['web','both'].includes(state.feed_searches?.[run_id]?.resource_source)) {
     const out=await new WebExploration(store).next(cycle,args)
     if(out.status!=='round_exhausted')return out
     const result = await finishRound(store, cycle, out.reason)
     if (result) return result
-    return nextExploration(store,{cycle_id},{signal,feed,readConfig})
+    return advanceExploration(store,cycle_id,{signal,feed,readConfig})
   }
   const slate=await feed(args,{signal})
   const envelope={cycle_id,run_id,round:cycle.round,max_rounds:cycle.max_rounds,feed_arguments:args,reading_budget:readingBudget(cycle),continue_with:{tool:'exploration_next',arguments:{cycle_id}}}
@@ -121,5 +134,5 @@ export async function nextExploration(store,{cycle_id},{signal,feed=runFeed,read
   }
   const result = await finishRound(store, cycle, '本轮清单已处理，按实际阅读条数结算')
   if (result) return result
-  return nextExploration(store,{cycle_id},{signal,feed,readConfig})
+  return advanceExploration(store,cycle_id,{signal,feed,readConfig})
 }

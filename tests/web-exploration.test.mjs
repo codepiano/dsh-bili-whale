@@ -20,7 +20,7 @@ const config={conceptSystem:{observe:true,learning:true,mode:'active',renderBudg
 const url='https://github.com/example/project/issues/42'
 const candidate={url,title:'维护升级的实际返工工时',snippet:'升级后返工花了两天，附复现与修复提交。'}
 const queries=['升级返工 工时 真实项目']
-async function fixture(t,kind='deep',maxVideos=1) {
+async function fixture(t,kind='deep',maxVideos=1,cycleId='night-web') {
   const home=fs.mkdtempSync(path.join(os.tmpdir(),'whale-web-'));t.after(()=>fs.rmSync(home,{recursive:true,force:true}))
   const store=new ObservationStore(home),engine=new ConceptEngine(store),web=new WebExploration(store)
   let group,member
@@ -31,7 +31,7 @@ async function fixture(t,kind='deep',maxVideos=1) {
   }
   await engine.call('exploration_question',{key:'q',collection_id:group,source_ids:['topic'],question:'怎样测量软件升级后的返工成本？',next_step:'查项目issue与commit',reason:'需要原始材料'})
   await engine.call('exploration_configure',{key:'cfg',ratios:{deep:kind==='deep'?1:0,revisit:kind==='revisit'?1:0,discover:kind==='discover'?1:0},reason:'测试固定探索路径'})
-  const next=()=>nextExploration(store,{cycle_id:'night-web'},{readConfig:()=>({...config,night:{maxVideos}}),feed:async args=>new FeedConcepts({config,store,runId:args.run_id,seed:args.seed}).plan([])})
+  const next=(id=cycleId, sessionId='fish')=>nextExploration(store,{cycle_id:id},{sessionId, readConfig:()=>({...config,night:{maxVideos}}),feed:async args=>new FeedConcepts({config,store,runId:args.run_id,seed:args.seed}).plan([])})
   const hooks=new Map(),ctx={on(name,fn){const entries=hooks.get(name)??[];entries.push(fn);hooks.set(name,entries);return ()=>hooks.set(name,(hooks.get(name)??[]).filter(f=>f!==fn))}}
   const host=createLearningHost({ctx,observer:{store},config:()=>config,sessionIds:['fish'],start:false})
   t.after(()=>host.stop())
@@ -58,7 +58,7 @@ async function fixture(t,kind='deep',maxVideos=1) {
     await prepare();await native('web_search',{queries},{sources:[candidate],truncated:false})
     let out=await next();assert.equal(out.next_action,'resource_assess')
     const input={...out.required_arguments,url,exploration:{relevance,reason:'候选提供返工成本证据',quote:'升级后返工花了两天'},stances:out.packet.stances.map(s=>({collection_id:s.collection_id,member_id:s.member_id,strength:0.5,reason:'支持读原始记录',quote:'附复现与修复提交'})),...(kind==='discover'?{discovered_term:'返工工时'}:{})}
-    await engine.call('resource_assess',input);assert.deepEqual(await engine.call('resource_assess',input),{status:'assessed',continue_with:{tool:'exploration_next',arguments:{cycle_id:'night-web'}}})
+    await engine.call('resource_assess',input);assert.deepEqual(await engine.call('resource_assess',input),{status:'assessed',continue_with:{tool:'exploration_next',arguments:{cycle_id:cycleId}}})
     return {out:await next(),input}
   }
   return {home,store,engine,web,next,native,acknowledge,prepare,searchAndSelect,host,group,member,ctx,hooks}
@@ -528,4 +528,25 @@ test('an empty round rotates to another eligible question and preserves selectio
   const decision = Object.values(f.store.state().concepts.decisions).at(-1)
   assert.equal(decision.exploration.target.question_id, second.packet.target.question_id)
   assert.equal((await f.engine.call('decision_replay',{preview_id:decision.preview_id})).matches,true)
+})
+
+test('scheduled wakes resume an archived body in its session and close an interrupted cycle after rotation', async t => {
+  const original = 'night-' + 'a'.repeat(24), later = 'night-' + 'b'.repeat(24)
+  const f = await fixture(t,'deep',1,original)
+  await f.searchAndSelect()
+  await f.native('web_fetch',{url},{url,statusCode:200,truncated:false,body:{content:'独立测试归档的完整正文'}},null,{skipPresentation:true})
+  const pending = await f.next()
+  assert.equal(pending.next_action,'resource_read_page')
+  const resumed = await f.next(later)
+  assert.deepEqual(resumed.arguments,pending.arguments)
+  assert.equal(resumed.cycle_id,original)
+  assert.deepEqual(await f.next(later),resumed)
+  assert.equal(f.store.events({type:'exploration.cycle_resumed'}).length,1)
+  const newWake = 'night-' + 'c'.repeat(24)
+  assert.equal((await f.next(newWake,'rotated')).cycle_id,newWake)
+  const stopped = await f.next(later,'rotated')
+  assert.equal(stopped.status,'interrupted')
+  assert.equal(stopped.last_step.read_id,pending.arguments.read_id)
+  assert.equal(f.store.state().web_runs[original+'-r1'].phase,'closed')
+  assert.equal(f.store.events({type:'exploration.exposed'}).length,0)
 })

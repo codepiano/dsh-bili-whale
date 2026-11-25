@@ -438,6 +438,7 @@ export class SqliteJournal {
             },
             put: r => db.prepare("INSERT INTO video_reads VALUES(?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET kind=excluded.kind,status=excluded.status,payload=excluded.payload")
               .run(r.id,r.bvid,r.kind,r.status,json(redact(r))),
+            forRun: run => db.prepare("SELECT payload FROM video_reads WHERE json_extract(payload,'$.feed.run_id')=? ORDER BY rowid DESC").all(run).map(r => JSON.parse(r.payload)),
             bindJob: (readId,jobId) => db.prepare("INSERT OR IGNORE INTO video_read_jobs VALUES(?,?)").run(readId,jobId),
             jobs: readId => db.prepare("SELECT j.payload FROM learning_jobs j JOIN video_read_jobs v ON v.job_id=j.id WHERE v.read_id=? ORDER BY j.id").all(readId).map(r=>JSON.parse(r.payload)),
             forJob: jobId => db.prepare("SELECT r.payload FROM video_reads r JOIN video_read_jobs v ON v.read_id=r.id WHERE v.job_id=?").all(jobId).map(r=>JSON.parse(r.payload)),
