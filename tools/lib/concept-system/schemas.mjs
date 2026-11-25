@@ -371,7 +371,7 @@ schemas.resource_unavailable=z.object({run_id:id,reason:text}).strict();
 schemas.resource_retry=z.object({key,run_id:id,url:z.string().url().max(8192)}).strict();
 
 schemas.resource_recover=z.object({
-  run_id:id,decision_id:id,reason:text,action:z.enum(['search','select','skip']),
+  run_id:id,decision_id:id,reason:text,action:z.enum(['search','select','skip','retry']),read_id:id.optional(),
   queries:z.array(z.string().trim().min(1).max(128)).min(1).max(3).optional(),
   url:z.string().url().max(8192).optional(),
 }).strict();

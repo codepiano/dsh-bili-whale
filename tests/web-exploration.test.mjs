@@ -550,3 +550,22 @@ test('scheduled wakes resume an archived body in its session and close an interr
   assert.equal(f.store.state().web_runs[original+'-r1'].phase,'closed')
   assert.equal(f.store.events({type:'exploration.exposed'}).length,0)
 })
+
+test('same-URL retry records its reason once and binds to the failed provider receipt',async t=>{
+  const f=await fixture(t)
+  await f.searchAndSelect()
+  await f.native('web_fetch',{url},{url,error_code:'WEB_PROVIDER_ERROR'})
+  const failure=await f.next()
+  assert.equal(failure.last_failure.code,'WEB_PROVIDER_ERROR')
+  const args={...failure.retry_arguments,reason:'原工具暂时失败，使用另一正文工具'}
+  await f.engine.call('resource_recover',args)
+  await f.engine.call('resource_recover',args)
+  assert.equal(f.store.events({type:'resource.fetch_retry_requested'}).length,1)
+  assert.equal((await f.next()).arguments.url,url)
+  await f.native('fish_gateway_fetch',{url,backend:'jina'},{provider:'common-mcp:jina',url,
+    statusCode:200,truncated:false,body:{content:'维护成本项目的公开调查原文。'}})
+  const page=await f.next()
+  assert.equal(page.next_action,'resource_read_page')
+  assert.equal(f.web.page(page.arguments).text,'维护成本项目的公开调查原文。')
+  await assert.rejects(f.engine.call('resource_recover',args),/current failed fetch/)
+})

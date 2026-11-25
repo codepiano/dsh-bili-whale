@@ -29,16 +29,20 @@ const latestRead = (state, run, selected) => {
     .find(read => read && (read.requested_url ?? read.url) === url)
 }
 const publicAlternatives = recovery => recovery.tried.length>=3?[]:recovery.results.filter(c=>!recovery.tried.includes(c.url))
-const recoveryStep = (base, selected) => {
+const recoveryStep = (base, selected, read) => {
   const recovery = selected.recovery
   const args = {run_id:base.run_id, decision_id:selected.decision_id}
   if (recovery?.status === 'search') return {...base,status:'resource_recovery_search',next_action:'fish_web_search',arguments:{queries:recovery.queries}}
   return {...base,status:'resource_recovery_required',next_action:'resource_recover',required_arguments:args,
     title:selected.title,original_url:selected.url,
+    ...(read?.status === 'failed' && {last_failure:{read_id:read.id, code:read.error_code,
+      tool:read.fetch_receipt?.tool, provider:read.fetch_receipt?.provider}}),
+    ...(read?.status === 'failed' && !read.access_blocked && {retry_arguments:{...args,action:'retry',read_id:read.id}}),
     ...(recovery?.results ? {public_candidates:publicAlternatives(recovery)} : {}),
-    instructions:recovery?.results
+    instructions:(recovery?.results
       ? '选结果中同一作品可公开访问的全文（作者稿、机构仓储或开放出版页），action=select 并给出理由。没有可信全文则 action=skip，再回 exploration_next 处理下一候选。不可绕过登录、付费、借阅或验证限制。'
-      : '用 action=search 和作品标题、作者或 DOI 组成 1–3 个查询，寻找同一作品公开全文，随后按 exploration_next 调用搜索。也可换抓取工具重试原链接，或用 action=skip 并给出放弃这份材料的理由。不可绕过访问限制。'}
+      : '用 action=search 和作品标题、作者或 DOI 组成 1–3 个查询，寻找同一作品公开全文，随后按 exploration_next 调用搜索。也可用 action=skip 解释放弃原因。不可绕过访问限制。') +
+      (read?.status === 'failed' && !read.access_blocked ? '临时故障可用 retry_arguments 和 reason 记录换工具的理由，然后重试同一 URL。' : '')}
 }
 const nativeText=result=>(result.content??[]).filter(b=>b.type==='text').map(b=>b.text).join('\n')
 export class WebExploration {
@@ -64,14 +68,18 @@ export class WebExploration {
       const video=selected.kind==='video'
       if (!video && selected.recovery?.status === 'skipped') continue
       const read=video?videoRows.find(r=>r.bvid===selected.bvid):latestRead(store.state(),run,selected)
-      if (!video && (['search','choose'].includes(selected.recovery?.status) || read?.status === 'failed')) return recoveryStep(base,selected)
+      if (!video && read?.status === 'failed' && selected.retry_after?.read_id === read.id &&
+          (!selected.recovery || selected.recovery.status === 'fetch'))
+        return {...base,status:'resource_read_required',next_action:'fish_web_fetch',arguments:{url:fetchUrl(selected)},
+          reason:selected.retry_after.reason,instructions:'选择合适的正文工具重试该 URL，然后回 exploration_next。'}
+      if (!video && (['search','choose'].includes(selected.recovery?.status) || read?.status === 'failed')) return recoveryStep(base,selected,read)
       if(!read)return {...base,status:video?'reading_required':'resource_read_required',next_action:video?'debrief_read':'fish_web_fetch',arguments:video?{bvid:selected.bvid,feed_run_id:run_id}:{url:fetchUrl(selected)},instructions:video?'读取实际字幕或云端转写，随后正文逐页交付；简介不算阅读。':'正文工具由你自主选择：原生web_fetch、fish_web_fetch（DS Fetch API）、fish_gateway_fetch（backend=jina/opencli/deepseek），可先fish_fetch_backends查配置。next_action是兼容默认，不强制使用；失败时可改用其它工具/后端重试同URL，不必新开cycle。回执不算阅读，随后resource_read_page逐页读。宿主保留工具、provider、正文和交付记录。仅代表这次页面，不能声称整个站点/仓库已读。失败或截断继续其它候选。'}
       if(video&&read.status==='audio_pending')return {...base,status:'audio_pending',next_action:'video_audio_status',arguments:{read_id:read.id},retry_after_seconds:30,instructions:'查同一个云端任务，pending至少30秒后再查或等下次作息，不重交。'}
       if(video&&read.status==='started') {
         if(store.now()-Date.parse(read.started_at)<480000)return {...base,status:'read_in_progress',next_action:'wait',read_id:read.id}
         await new VideoReads(store).fail(read.id,Error('Fixed debrief acquisition deadline expired'));continue
       }
-      if (!video && read.status !== 'failed' && !read.sources?.length) return recoveryStep(base,selected)
+      if (!video && read.status !== 'failed' && !read.sources?.length) return recoveryStep(base,selected,read)
       if(read.status==='failed'||video&&(!isVideoTextKind(read.kind)||read.coverage?.truncated))continue
       if(video&&!read.session_id)return {...base,status:'awaiting_host_receipt',next_action:read.audio_draft?'video_audio_status':'wait',...(read.audio_draft?{arguments:{read_id:read.id}}:{read_id:read.id})}
       if(!read.reading_complete) {
@@ -102,6 +110,17 @@ export class WebExploration {
       if(run?.phase!=='reading'||!selected||!decision?.exploration||decision.exploration.progress) throw Error('No unresolved selected web resource')
       const read=latestRead(d.state,run,selected)
       const recovery=selected.recovery
+      if (action === 'retry') {
+        if (!read || input.url || input.queries || read.id !== input.read_id || read.status !== 'failed' ||
+            read.access_blocked || (recovery && recovery.status !== 'fetch'))
+          throw Error('Retry requires the current failed fetch receipt and a reason')
+        if (selected.retry_after?.read_id !== read.id) {
+          selected.retry_after = {read_id:read.id,reason}
+          emit('resource.fetch_retry_requested',{run_id,decision_id,read_id:read.id,url:fetchUrl(selected),reason},{session_id:run.session_id})
+        }
+        return {status:'retry_requested',continue_with:continuation(run.cycle_id)}
+      }
+      if (input.read_id) throw Error('Only retry accepts a failed fetch receipt ID')
       if (action==='search') {
         if (!input.queries || input.url || !read || recovery || (read.status!=='failed' && read.sources?.length && !read.reading_complete)) throw Error('Recovery requires a fetch attempt and one search per resource')
         selected.recovery={status:'search',queries:input.queries,tried:[]}
