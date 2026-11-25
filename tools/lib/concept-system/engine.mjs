@@ -15,6 +15,7 @@ import {
   mutateExploration,
 } from "./exploration.mjs";
 const ALGORITHM = "concept-v1";
+const READING_EVIDENCE_POLICY = "reading-source-mean-v1";
 export const PARAMETERS = Object.freeze({
   algorithm: ALGORITHM,
   fatigueHalfLifeMs: 6 * 3600000,
@@ -63,17 +64,58 @@ export function collectionStrength(c, s) {
     3,
   );
 }
-export function scoreDecision(state, input, now) {
+const mean = (values) =>
+  values.reduce((total, value) => total + value, 0) / (values.length || 1);
+
+function sortedGroups(items, key) {
+  const groups = Map.groupBy(items, key);
+  return [...groups.keys()].sort().map((id) => groups.get(id));
+}
+
+function scoreReadingEvidence(state, terms) {
+  const contributions = [];
+  const sources = sortedGroups(terms, (term) =>
+    evidenceIdentity(state, state.members[term.member_id].source_id),
+  );
+  const sourceScores = sources.map((source) => {
+    const judgments = sortedGroups(source, (term) =>
+      JSON.stringify([term.member_id, term.purpose, term.relevance, term.strength]),
+    );
+    const judgmentScores = judgments.map((judgment) => {
+      // One member can express the same judgment through multiple collections.
+      const placements = sortedGroups(judgment, (term) => term.collection_id);
+      const placementScores = placements.map((copies) => {
+        const reasons = [...new Set(copies.map((term) => term.reason))].sort();
+        contributions.push({
+          ...copies[0],
+          reason: reasons[0],
+          ...(reasons.length > 1 ? { other_reasons: reasons.slice(1) } : {}),
+          score_weight: 1 / (sources.length * judgments.length * placements.length),
+        });
+        return copies[0].value;
+      });
+      return mean(placementScores);
+    });
+    return mean(judgmentScores);
+  });
+  return { contributions, base: mean(sourceScores) };
+}
+
+export function scoreDecision(
+  state, input, now,
+  evidencePolicy = ["watch", "feed"].includes(input.scene) ? READING_EVIDENCE_POLICY : null,
+) {
   const p = state.parameters;
   if (p.algorithm !== ALGORITHM) throw Error("Unsupported decision algorithm");
+  if (evidencePolicy !== null && evidencePolicy !== READING_EVIDENCE_POLICY)
+    throw Error("Unsupported decision evidence policy");
   const exploration = validateExploration(state, input, now);
   const labels = new Set();
   const rows = [];
   for (const option of input.options) {
     if (labels.has(option.label)) throw Error("Option labels must be unique");
     labels.add(option.label);
-    const seen = new Set(),
-      contributions = [];
+    const seen = new Set(), terms = [];
     for (const item of option.contributions) {
       const c = own(state.collections, item.collection_id),
         m = own(state.members, item.member_id);
@@ -90,9 +132,11 @@ export function scoreDecision(state, input, now) {
         (!m.tags.includes("belief") || m.interpretation !== "explicit")
       )
         throw Error("Stance contributions require an explicit accepted belief");
-      const evidence = evidenceIdentity(state, m.source_id);
-      if (seen.has(evidence)) continue;
-      seen.add(evidence);
+      if (!evidencePolicy) {
+        const evidence = evidenceIdentity(state, m.source_id);
+        if (seen.has(evidence)) continue;
+        seen.add(evidence);
+      }
       const evidenceBase = collectionStrength(c, state),
         f = fatigue(c, input.scene, now, p);
       const legacyWeight = c.legacy_pref?.weight;
@@ -109,7 +153,7 @@ export function scoreDecision(state, input, now) {
             }
           : null;
       const base = evidenceBase * (prior?.factor ?? 1);
-      contributions.push({
+      terms.push({
         ...item,
         ...(prior ? { legacy_prior: prior, evidence_base: evidenceBase } : {}),
         base,
@@ -117,9 +161,9 @@ export function scoreDecision(state, input, now) {
         value: base * item.relevance * item.strength * (1 - f),
       });
     }
-    const base = contributions.length
-      ? contributions.reduce((n, c) => n + c.value, 0) / contributions.length
-      : 0;
+    const { contributions, base } = evidencePolicy
+      ? scoreReadingEvidence(state, terms)
+      : { contributions: terms, base: mean(terms.map((term) => term.value)) };
     rows.push({
       label: option.label,
       ...(exploration ? { target: option.target ?? null,...(option.candidate_domain?{candidate_domain:option.candidate_domain}:{}) } : {}),
@@ -149,6 +193,7 @@ export function scoreDecision(state, input, now) {
   return {
     ...(exploration ? { exploration } : {}),
     algorithm: ALGORITHM,
+    ...(evidencePolicy ? { evidence_policy: evidencePolicy } : {}),
     parameters: { ...p },
     at: now,
     input,
@@ -616,7 +661,7 @@ export class ConceptEngine {
     if (!p) throw Error("Unknown preview");
     const original = this.store.getObject(p.object).content,
       s = this.store.getObject(p.state_object).content;
-    const result = scoreDecision(s, original.input, original.at);
+    const result = scoreDecision(s, original.input, original.at, original.evidence_policy ?? null);
     return { matches: stable(result) === stable(original), result };
   }
   async render({ subject, scene, budget }) {

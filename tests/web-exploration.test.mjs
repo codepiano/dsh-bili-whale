@@ -89,7 +89,11 @@ test('native search → cited judgments → native body → delivery → progres
   out=await next();assert.equal(out.status,'complete');assert.equal(out.url,url)
   await acknowledge();assert.equal(store.events({type:'exploration.exposed'}).length,1)
   assert.deepEqual(await next(),out)
-  assert.equal((await engine.call('decision_replay',{preview_id:decision.preview_id})).matches,true)
+  const replay=await engine.call('decision_replay',{preview_id:decision.preview_id})
+  assert.ok(replay.matches)
+  const terms=replay.result.rows.find(r=>r.label===decision.selected).contributions
+  assert.deepEqual(new Set(terms.map(c=>c.purpose)),new Set(['stance','exploration']))
+  assert.deepEqual(terms.map(c=>c.score_weight),[0.5,0.5])
 })
 test('search receipts are session scoped; invalid quotes, incomplete stances and caller-provided bodies cannot create reads',async t=>{
   const f=await fixture(t);let out=await f.prepare()

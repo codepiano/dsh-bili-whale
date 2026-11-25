@@ -137,6 +137,12 @@ test("beliefs change actual slate through cited judgments, without becoming topi
   assert.equal(decision.feed_judgment.stance_ids.length, 6);
   const saved = store.preview(decision.preview_id),
     preview = store.getObject(saved.object).content;
+  for (const row of preview.rows) {
+    const target = row.contributions.find((term) => term.purpose === "exploration");
+    const stance = row.contributions.find((term) => term.member_id === target.member_id && term.purpose === "stance");
+    assert.equal(target.score_weight, 1 / 12);
+    assert.equal(stance.score_weight, target.score_weight);
+  }
   assert.ok(
     preview.rows.every(
       (r) => r.contributions.filter((c) => c.purpose === "stance").length === 6,

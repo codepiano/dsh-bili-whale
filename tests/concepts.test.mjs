@@ -27,6 +27,7 @@ async function add(
     key = "a",
     content = "康德",
     sourceId = key,
+    sourceRef,
     subject = "fish",
     interpretation = "explicit",
     collection = "哲学",
@@ -41,6 +42,7 @@ async function add(
       type: "conversation",
       actor: "user",
       excerpt: "最近想了解" + content,
+      ...(sourceRef ? { ref: sourceRef } : {}),
     },
     subject,
     content,
@@ -180,6 +182,68 @@ test("previews are reproducible, preserve state, expose terms and respect inelig
     /unique/,
   );
 });
+test("reading decisions share one vote per source and retain opposing reasons in either order", async (t) => {
+  const { engine } = box(t);
+  const shared = { sourceRef: "conversation:one", tags: ["belief"] };
+  const pro = await add(engine, { ...shared, content: "值得追问" });
+  const con = await add(engine, { ...shared, key: "b", content: "材料重复", collection: "已有阅读" });
+  const other = await add(engine, { key: "c", content: "独立观察", collection: "其他线索" });
+  const review = await engine.call("concept_review", {
+    key: "also-in-history", candidate_id: pro.member, status: "accepted",
+    reason: "同一成员也属于另一集合", collections: [{ name: "阅读历史" }],
+  });
+
+  for (const scene of ["watch", "feed"]) {
+    const request = input(pro, other, { scene });
+    const support = { ...request.options[0].contributions[0], purpose: "stance", strength: 1 };
+    const oppose = { ...support, member_id: con.member, collection_id: con.group, strength: -1, reason: "已经读过" };
+    const independent = { ...request.options[1].contributions[0], strength: 0.6 };
+    const preview = (reasons) => {
+      request.options[0].contributions = reasons;
+      return engine.call("decision_preview", request);
+    };
+    const reasons = [support, oppose, independent];
+    const first = await preview(reasons);
+    assert.equal(first.winner, "娱乐");
+    assert.deepEqual((await preview([...reasons].reverse())).rows, first.rows);
+    assert.deepEqual((await preview([oppose, independent, support, support])).rows, first.rows);
+    assert.equal(first.rows[0].contributions.length, 3);
+    const separate = first.rows[0].contributions.find((c) => c.member_id === other.member);
+    assert.equal(separate.score_weight, 0.5);
+    assert.equal(first.rows[0].base, separate.value / 2);
+
+    const extraPlacement = { ...support, collection_id: review.collection_ids[0] };
+    const reworded = { ...support, reason: "换种说法表达同一判断" };
+    const expanded = await preview([...reasons, extraPlacement, reworded]);
+    const row = expanded.rows[0];
+    assert.equal(row.base, first.rows[0].base);
+    const supportingTerms = row.contributions.filter((c) => c.member_id === pro.member);
+    assert.deepEqual(supportingTerms.map((c) => c.score_weight), [0.125, 0.125]);
+    const original = supportingTerms.find((c) => c.collection_id === pro.group);
+    assert.deepEqual(new Set([original.reason, ...original.other_reasons]), new Set([support.reason, reworded.reason]));
+    assert.deepEqual((await preview([reworded, extraPlacement, ...reasons])).rows, expanded.rows);
+    assert.ok((await engine.call("decision_replay", { preview_id: expanded.preview_id })).matches);
+  }
+});
+
+test("archived reading previews without an evidence policy replay the first contribution per source", async (t) => {
+  const { store, engine } = box(t);
+  const a = await add(engine);
+  const request = input(a, a, { scene: "expression" });
+  const [first] = request.options[0].contributions;
+  request.options[0].contributions.push({ ...first, strength: -1, reason: "相反的理由" });
+  // With no fatigue, this produces the same archived terms and scores as the original watch policy.
+  const { preview_id, ...old } = await engine.call("decision_preview", request);
+  assert.equal(old.rows[0].contributions.length, 1);
+  assert.equal(old.rows[0].contributions[0].strength, first.strength);
+  assert.equal(old.evidence_policy, undefined);
+  old.input.scene = "watch";
+  const saved = store.preview(preview_id);
+  const object = store.object(old);
+  await store.transaction({}, (draft) => draft.savePreview("old-reading", { ...saved, object: object.hash }));
+  assert.ok((await engine.call("decision_replay", { preview_id: "old-reading" })).matches);
+});
+
 test("commit is atomic, idempotent, conflict checked; only selected scene fatigue changes and later recovers", async (t) => {
   const { engine, store, advance } = box(t),
     a = await add(engine),
