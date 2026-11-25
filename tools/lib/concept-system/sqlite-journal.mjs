@@ -6,6 +6,8 @@ import { hash, stable, redact } from "./store.mjs";
 
 const require = createRequire(import.meta.url);
 const APPLICATION_ID = 0x42574353;
+const BUSY_TIMEOUT_MS = 10_000;
+const SQLITE_BUSY = 5;
 const ENTITY_KINDS = [
   "members",
   "collections",
@@ -189,6 +191,25 @@ function assertRegular(file) {
     throw Error("SQLite or legacy path must be a regular file");
 }
 
+// During the first WAL transition SQLite can return SQLITE_BUSY immediately, even
+// with a busy handler, when two openers try to upgrade their read locks.
+function enableWal(db) {
+  const wait = new Int32Array(new SharedArrayBuffer(4));
+  const deadline = performance.now() + BUSY_TIMEOUT_MS;
+  db.exec("PRAGMA busy_timeout=0");
+  for (;;) {
+    try {
+      db.exec("PRAGMA journal_mode=WAL");
+      break;
+    } catch (error) {
+      const remaining = deadline - performance.now();
+      if ((error.errcode & 0xff) !== SQLITE_BUSY || remaining <= 0) throw error;
+      Atomics.wait(wait, 0, 0, Math.min(25, remaining));
+    }
+  }
+  db.exec(`PRAGMA busy_timeout=${BUSY_TIMEOUT_MS}`);
+}
+
 export class SqliteJournal {
   constructor(store) {
     this.store = store;
@@ -218,7 +239,7 @@ export class SqliteJournal {
       fs.chmodSync(this.store.file, 0o600);
       db = new DatabaseSync(this.store.file);
       db.exec(
-        "PRAGMA busy_timeout=10000; PRAGMA foreign_keys=ON; PRAGMA trusted_schema=OFF;",
+        `PRAGMA busy_timeout=${BUSY_TIMEOUT_MS}; PRAGMA foreign_keys=ON; PRAGMA trusted_schema=OFF;`,
       );
       // Both header values must come from one read snapshot while another process initializes.
       db.exec("BEGIN");
@@ -226,9 +247,8 @@ export class SqliteJournal {
         app = db.prepare("PRAGMA application_id").get().application_id;
       db.exec("COMMIT");
       if (version === 0 && app === 0) {
-        db.exec(
-          "PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; BEGIN IMMEDIATE;",
-        );
+        enableWal(db);
+        db.exec("PRAGMA synchronous=FULL; BEGIN IMMEDIATE;");
         try {
           // Another process may have initialized while this connection waited for the writer lock.
           const lockedVersion = db
