@@ -38,7 +38,7 @@ const recoveryStep = (base, selected) => {
     ...(recovery?.results ? {public_candidates:publicAlternatives(recovery)} : {}),
     instructions:recovery?.results
       ? '选结果中同一作品可公开访问的全文（作者稿、机构仓储或开放出版页），action=select 并给出理由。没有可信全文则 action=skip，再回 exploration_next 处理下一候选。不可绕过登录、付费、借阅或验证限制。'
-      : '用 action=search 和作品标题、作者或 DOI 组成 1–3 个查询，寻找同一作品公开全文，随后按 exploration_next 调用搜索。也可先换抓取工具重试原链接。不可绕过访问限制。'}
+      : '用 action=search 和作品标题、作者或 DOI 组成 1–3 个查询，寻找同一作品公开全文，随后按 exploration_next 调用搜索。也可换抓取工具重试原链接，或用 action=skip 并给出放弃这份材料的理由。不可绕过访问限制。'}
 }
 const nativeText=result=>(result.content??[]).filter(b=>b.type==='text').map(b=>b.text).join('\n')
 export class WebExploration {
@@ -64,8 +64,7 @@ export class WebExploration {
       const video=selected.kind==='video'
       if (!video && selected.recovery?.status === 'skipped') continue
       const read=video?videoRows.find(r=>r.bvid===selected.bvid):latestRead(store.state(),run,selected)
-      if (!video && (['search','choose'].includes(selected.recovery?.status) || read?.access_blocked ||
-        (read && (read.status === 'failed' || !read.sources?.length) && selected.recovery))) return recoveryStep(base,selected)
+      if (!video && (['search','choose'].includes(selected.recovery?.status) || read?.status === 'failed')) return recoveryStep(base,selected)
       if(!read)return {...base,status:video?'reading_required':'resource_read_required',next_action:video?'debrief_read':'fish_web_fetch',arguments:video?{bvid:selected.bvid,feed_run_id:run_id}:{url:fetchUrl(selected)},instructions:video?'读取实际字幕或云端转写，随后正文逐页交付；简介不算阅读。':'正文工具由你自主选择：原生web_fetch、fish_web_fetch（DS Fetch API）、fish_gateway_fetch（backend=jina/opencli/deepseek），可先fish_fetch_backends查配置。next_action是兼容默认，不强制使用；失败时可改用其它工具/后端重试同URL，不必新开cycle。回执不算阅读，随后resource_read_page逐页读。宿主保留工具、provider、正文和交付记录。仅代表这次页面，不能声称整个站点/仓库已读。失败或截断继续其它候选。'}
       if(video&&read.status==='audio_pending')return {...base,status:'audio_pending',next_action:'video_audio_status',arguments:{read_id:read.id},retry_after_seconds:30,instructions:'查同一个云端任务，pending至少30秒后再查或等下次作息，不重交。'}
       if(video&&read.status==='started') {
@@ -106,6 +105,9 @@ export class WebExploration {
       if (action==='search') {
         if (!input.queries || input.url || !read || recovery || (read.status!=='failed' && read.sources?.length && !read.reading_complete)) throw Error('Recovery requires a fetch attempt and one search per resource')
         selected.recovery={status:'search',queries:input.queries,tried:[]}
+      } else if (action === 'skip' && read?.status === 'failed' && !recovery) {
+        if (input.url || input.queries) throw Error('Skip requires only a reason')
+        selected.recovery = {status:'skipped', reason, tried:[]}
       } else {
         if (!recovery?.results || (recovery.status==='fetch' && !read)) throw Error('Complete the public full-text search or pending fetch first')
         if (read && read.status!=='failed' && !read.reading_complete) throw Error('Read the archived pages before choosing another source')

@@ -12,7 +12,7 @@
 
 OpenCLI 的支持范围、安装与登录前提沿 Web Fetch 的配置返回；configured 不代表登录或目标可读。OpenCLI 问题页的摘要限制、各后端完整性提示与截断标记会随回执保留。网关适配读取服务器私有 COMMON_MCP_ENV_FILE（默认既有 common-mcp 的 .runtime/http.env），通过本机固定业务 API 访问 Web Fetch，凭据不进入模型参数和输出。
 
-失败后，鱼可在调用下一次 exploration_next 前换工具重试同 URL。最新尝试用于续步，之前失败证据仍在 feed_details 的 reads 中；已有正文优先继续交付。已经判定不适合作为材料并记录 failed progress 的阅读，可用 resource_retry 新建关联旧记录的明确重试。
+首次抓取失败后，exploration_next 返回 resource_recover。鱼可换工具重试同 URL、为同一作品检索公开全文，或提交跳过理由。最新尝试用于续步，之前失败证据仍在 feed_details 的 reads 中；已有正文优先继续交付。已经判定不适合作为材料并记录 failed progress 的阅读，可用 resource_retry 新建关联旧记录的明确重试。
 
 原生工具的完整渲染正文沿真实宿主交付回执确认；精简抓取工具的正文归档后由 resource_read_page 逐页交付。搜索摘要、抓取成功元信息、挑战页、未读完或截断不能冒充已读。保留实际工具/provider、失败、源完整性提示、阅读与 Mem 回执；这不限制鱼选择哪种抓取能力。
 

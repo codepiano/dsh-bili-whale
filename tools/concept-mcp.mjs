@@ -9,7 +9,7 @@ const engine = new ConceptEngine(),
   server = new McpServer({ name: "bili-whale-concepts", version: "0.1.0" });
 const descriptions = {
   reading_domain_assess:"为实际完整交付的正文记录领域判断与原文依据，独立于搜索候选和概念群ID；保留理由和修订历史。不能用搜索摘要或计划领域冒充正文判断。",
-  resource_recover:'同一选中作品的公开全文恢复。摘要、验证、登录、借阅、书目或空正文用 action=search 和标题/作者/DOI 查询，回 exploration_next 取得实际搜索；action=select 仅选真实搜索结果中的同作品公开全文，找不到用 action=skip 继续下一个候选。保留失败回执，不改探索配额。',
+  resource_recover:'同一选中作品的公开全文恢复。普通抓取失败可换工具重试原链接或用 action=skip 记录原因；寻找同作品公开版本用 action=search 和标题/作者/DOI 查询，回 exploration_next 取得实际搜索；action=select 仅选真实搜索结果中的同作品公开全文，找不到用 action=skip 继续下一个候选。保留失败回执，不改探索配额。',
   resource_retry:'仅在明确要求重试旧链接时使用；run_id和url必须对应原来已选的归档网页。用新key创建独立单条重试cycle，相同key幂等恢复。保留原决策、旧回执与关联，不重置自动cycle，不搜索或抬分。随后用exploration_next自主选择正文工具并完成逐页阅读。',
   resource_unavailable:'仅在鱼专用fish_web_search及自行选择web_fetch/fish_web_fetch/fish_gateway_fetch未注册或无法执行时报告原因，标为调用者报告而非提供方实际故障。不产生阅读或曝光，继续正常预算。',
   resource_assess:'评估联合搜索实际返回的当前视频或网页候选；按URL匹配完整立场，原文引述标题/摘要，相关度低于0.5不选。仅记录选题判断，不接受调用者提交网页正文或冒充已读。',

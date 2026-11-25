@@ -106,6 +106,8 @@ test('search receipts are session scoped; invalid quotes, incomplete stances and
 test('native fetch truncation, HTTP error and native tool failures exhaust bounded rounds without exposure',async t=>{
   const f=await fixture(t);let {out}=await f.searchAndSelect()
   await f.native('web_fetch',{url},{url,statusCode:200,body:{kind:'text',content:'部分正文'},truncated:true},{url,statusCode:200,truncated:true})
+  out=await f.next();assert.equal(out.next_action,'resource_recover')
+  await f.engine.call('resource_recover',{...out.required_arguments,action:'skip',reason:'截断的网页没有可用正文'})
   out=await f.next();assert.equal(out.round,2);assert.equal(out.next_action,'feed_search_plan')
   await f.engine.call('feed_search_plan',{...out.required_arguments,source:'web',queries,reason:'换来源继续正常预算'})
   await f.next();await f.native('web_search',{queries},undefined,undefined,{error:true})
