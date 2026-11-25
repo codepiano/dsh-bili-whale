@@ -65,15 +65,21 @@ function summarize(store, read) {
 const newestFirst = (a, b) => (b.at ?? "").localeCompare(a.at ?? "") || a.id.localeCompare(b.id);
 const normalize = (text) => text.normalize("NFKC").replace(/\s+/g, " ").toLowerCase();
 
+export function archivedReadings(db, store, {kind, since, until} = {}) {
+  return [...records(db, kind)]
+    .filter((read) => {
+      if (!since && !until) return true;
+      const at = new Date(read.read_completed_at ?? read.presented_at ?? read.completed_at ?? read.acquired_at);
+      if (!Number.isFinite(at.valueOf())) return false;
+      const date = beijingDay(at);
+      return (!since || date >= since) && (!until || date <= until);
+    })
+    .map((read) => summarize(store, read));
+}
+
 export function listReadings(db, store, { query, kind, day, page, limit }) {
   const needle = normalize(query.trim());
-  const items = [...records(db, kind)]
-    .filter((read) => {
-      if (!day) return true;
-      const at = new Date(read.read_completed_at ?? read.presented_at ?? read.completed_at ?? read.acquired_at);
-      return Number.isFinite(at.valueOf()) && beijingDay(at) === day;
-    })
-    .map((read) => summarize(store, read))
+  const items = archivedReadings(db, store, {kind, since:day, until:day})
     .filter((item) => !needle || [item.title, item.url, item.bvid, item.id]
       .some((value) => value && normalize(value).includes(needle)))
     .sort(newestFirst);

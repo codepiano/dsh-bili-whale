@@ -84,3 +84,20 @@ test('C3 file backend dry run must not create a notification',t=>{const out=path
 test('B1 skip consumes one opportunity; B2/B3 gap survives replan',()=>{const start=new Date('2026-10-22T03:00:00').getTime(),cfg={windows:[{start:'03:00',end:'03:20',wakes:5}],skipChance:1,minGapMin:10};const first=makePlan(cfg,{},start,()=>0),done=completePlan(first,start);const next=makePlan(cfg,historyOf(done,start+1000),start+1000,()=>0);assert.equal(next.action,'skip');assert.match(next.withinWindow,/2\/5/);assert.equal(next.atMs,start+600000);const after=completePlan(next,next.atMs);assert.equal(makePlan(cfg,after,next.atMs+1000,()=>0).action,'done');const longer={...cfg,windows:[{start:'03:00',end:'04:00',wakes:5}]};assert.notEqual(makePlan(longer,after,next.atMs+1000,()=>0).action,'done')})
 test('B4/B5 midnight chooses earliest real deadline',()=>{const now=new Date('2026-10-22T00:30:00').getTime(),cfg={windows:[{start:'23:00',end:'01:00',wakes:1},{start:'00:00',end:'08:00',wakes:1}],skipChance:0};assert.equal(makePlan(cfg,{},now,()=>0).windowKey,'2026-10-21|23:00–01:00');for(const at of ['2026-10-21T23:30:00','2026-10-22T00:30:00'])assert.equal(inWindow({windows:[cfg.windows[0]]},Date.parse(at)),true)})
 test('D2 silence lowers cap; D3 daily quota resets next day',t=>{const s=sandbox(t,{quota:{shareDaily:3}});s.write('feedback.json',{last:new Date(Date.now()-4*864e5).toISOString()});const silence=s.run('quota',['silence']);assert.equal(silence.status,0);assert.match(silence.stdout,/4/);s.write('quota.json',{log:Array.from({length:5},()=>({at:new Date().toISOString(),share:true,target:'different'}))});assert.equal(s.run('quota',['check','--share','--target','BV:new']).status,2);s.write('quota.json',{log:Array.from({length:5},()=>({at:new Date(Date.now()-864e5).toISOString(),share:true,target:'different'}))});assert.equal(s.run('quota',['check','--share','--target','BV:new']).status,0)})
+
+test('diary uses delivered readings and only the requested dated reflections', async t => {
+ const s=sandbox(t)
+ const {ObservationStore}=await import('../tools/lib/concept-system/store.mjs')
+ const store=new ObservationStore(path.join(s.data,'concept-system'))
+ const day=new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Shanghai'}).format(new Date())
+ await store.transaction({}, d => {
+   const item={id:'read',bvid:'BV1234567890',kind:'subtitles',status:'presented',title:'已读字幕',
+     sources:[{id:'page'}],reading_complete:true,read_completed_at:new Date().toISOString()}
+   d.reads.put(item);d.reads.put({...item,id:'preview',title:'未交付字幕',reading_complete:false})
+ })
+ fs.writeFileSync(path.join(s.dsh,'whale-diary.md'),`# 2000-01-01\n## 想说\n旧想法\n# ${day}\n## 想说（不发）\n今天的想法\n`)
+ const r=s.run('diary',['show'])
+ assert.equal(r.status,0,r.stderr)
+ assert.match(r.stdout,/看过 1 条/);assert.match(r.stdout,/已读字幕/);assert.match(r.stdout,/今天的想法/)
+ assert.doesNotMatch(r.stdout,/未交付字幕|旧想法/)
+})

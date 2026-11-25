@@ -15,6 +15,10 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { config } from '../lib/config.mjs'
+import { indexDiary } from '../lib/diary-index.mjs'
+import { beijingDay } from '../lib/observer-logs.mjs'
+import { ObserverReader } from '../lib/concept-system/observer-read.mjs'
+import { archivedReadings } from '../lib/observer-readings.mjs'
 import { dshPath } from '../lib/paths.mjs'
 
 
@@ -31,7 +35,7 @@ const HOME = (process.env.USERPROFILE || process.env.HOME || '/')
 const DIARY = dshPath('whale-diary.md')
 const QUOTA = path.join(HOME, '.bili-ai', 'quota.json')
 const LOG = dshPath('whale-log.jsonl')
-const today = () => new Date().toLocaleDateString('sv-SE')
+const today = () => beijingDay(new Date())
 const hhmm = (iso) => String(iso).slice(11, 16)
 
 if (cmd === 'log') {
@@ -56,37 +60,43 @@ if (cmd === 'tail') {
 
 if (cmd === 'show' || !cmd) {
   const days = Number(opt.days ?? 1)
-  const since = new Date(Date.now() - (days - 1) * 86400000).toLocaleDateString('sv-SE')
+  if (!Number.isSafeInteger(days) || days < 1 || days > 36500) {
+    console.error('--days 需要 1 至 36500 的整数'); process.exit(1)
+  }
+  const since = beijingDay(new Date(Date.now() - (days - 1) * 86400000))
   const title = config().persona?.diaryTitle ?? '今日摘要'
   console.log(`════════ ${title}（${since} ~ ${today()}）════════\n`)
 
   // ① 叙事部分：解析日记
   let text = ''
   try { text = fs.readFileSync(DIARY, 'utf8') } catch { console.log(`（读不到日记 ${DIARY}）`) }
-  if (text) {
-    const sections = {}
-    let cur = null
-    for (const line of text.split(/\r?\n/)) {
-      const h = line.match(/^##\s+(.+)$/)
-      if (h) { cur = h[1].trim(); sections[cur] = []; continue }
-      if (cur) sections[cur].push(line)
+  const reader = new ObserverReader()
+  const archived = reader.use(db => archivedReadings(db, reader.store, {since, until:today()}), null)
+  const entries = indexDiary(text).filter(entry => !entry.key || (entry.key >= since && entry.key <= today()))
+  const seen = []
+  const thoughts = []
+  for (const entry of entries) {
+    let section = ''
+    for (const line of entry.content.split(/\r?\n/)) {
+      if (/^#{1,2}\s/.test(line)) { section = line.replace(/^#+\s+/, ''); continue }
+      if (section.includes('想说') && line.trim() && !/^(?:-\s*)?（空/.test(line.trim())) {
+        thoughts.push({day:entry.key, text:line.trim().replace(/^-\s*/, '')})
+      }
+      if (archived === null && section.includes('看过') && line.startsWith('|')) {
+        const cells = line.replace(/^\||\|$/g,'').split('|').map(s => s.trim())
+        const day = cells[0].match(/\b\d{4}-\d{2}-\d{2}\b/)?.[0]
+        if (day && day >= since && day <= today()) seen.push({day,title:cells[2],description:cells[3],thought:cells[4]})
+      }
     }
-    // 看过的：表格里日期匹配的
-    const seenKey = Object.keys(sections).find((k) => k.includes('看过')) ?? ''
-    const rows = (sections[seenKey] ?? []).filter((l) => l.startsWith('|') && !/^\|\s*-+/.test(l) && !l.includes('| 时间 |'))
-    const hit = rows.filter(r => {const date=r.match(/\b\d{4}-\d{2}-\d{2}\b/)?.[0];return date && date>=since && date<=today()})
-    console.log(`【看过 ${hit.length} 条】`)
-    for (const r of hit) {
-      const c = r.replace(/^\s*\||\|\s*$/g,'').split('|').map(s=>s.trim())
-      console.log(`  · ${c[2] ?? c[0]}  ${String(c[3] ?? '').slice(0, 46)}`)
-      if (c[4]) console.log(`      她的想法：${String(c[4]).slice(0, 120)}`)
-    }
-    // 想法池
-    const wantKey = Object.keys(sections).find((k) => k.includes('想说')) ?? ''
-    const wants = (sections[wantKey] ?? []).filter((l) => l.trim().startsWith('-') && !/^-\s*（空/.test(l.trim()))
-    console.log(`\n【想说但还没说 ${wants.length} 条】`)
-    for (const w of wants) console.log('  ' + w.trim().replace(/^-\s*/, '  · ').slice(0, 150))
   }
+  const readings = archived ?? seen
+  console.log(`【看过 ${readings.length} 条】`)
+  for (const item of readings.sort((a,b) => (b.at ?? b.day).localeCompare(a.at ?? a.day))) {
+    console.log(`  · ${item.title}  ${item.day} ${item.description ?? ''}`)
+    if (item.thought) console.log('      她的想法：' + item.thought)
+  }
+  console.log(`\n【想说但还没说 ${thoughts.length} 条】`)
+  for (const item of thoughts) console.log('  · ' + (item.day ? item.day + ' ' : '') + item.text)
 
   // ② 发言账（她真的对外说了什么）
   console.log('\n【对外发言（今天）】')
