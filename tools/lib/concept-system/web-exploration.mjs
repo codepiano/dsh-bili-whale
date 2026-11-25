@@ -204,7 +204,7 @@ export class WebExploration {
       let remaining=options
       run.selected=[]
       while(remaining.length&&run.selected.length<Math.min(cycle.n??1,relevant.length,route.reading_limit??cycle.n??1)) {
-        const input={question:'选择有助于当前问题的网页正文',scene:'watch',subject:'fish',seed:run_id+':web:'+run.selected.length,trace_id:'resource-'+hash(run_id).slice(0,32),options:remaining,exploration:{path:route.path,seed:route.seed,state_version:hash(s),reason:'按真实网页候选和立场判断选择'},feed_judgment:{run_id,read_policy:'resource-page-v1',relevance_policy:FEED_RELEVANCE_POLICY}}
+        const input={question:'选择有助于当前问题的网页正文',scene:'watch',subject:'fish',seed:run_id+':web:'+run.selected.length,trace_id:'resource-'+hash(run_id).slice(0,32),options:remaining,exploration:{path:route.path,seed:route.seed,...(route.empty_question_ids && {empty_question_ids:route.empty_question_ids}),state_version:hash(s),reason:'按真实网页候选和立场判断选择'},feed_judgment:{run_id,read_policy:'resource-page-v1',relevance_policy:FEED_RELEVANCE_POLICY}}
         const scored=scoreDecision(s,input,store.now());input.feed_judgment.read_policy=run.candidates.find(c=>c.url===scored.winner).kind==='video'?'subtitle-pages-v1':'resource-page-v1';const object=store.object(scored),state_object=store.object(s),preview_id=crypto.randomUUID()
         d.savePreview(preview_id,{object:object.hash,state_object:state_object.hash,committed:null});emit('decision.previewed',{id:preview_id,object,state_object,winner:scored.winner,state_version:scored.state_version},{trace_id:input.trace_id,source:'web'})
         const decision=commitScoredDecision(s,scored,{preview_id,reason:'选入网页阅读清单，尚未阅读'},store.now())

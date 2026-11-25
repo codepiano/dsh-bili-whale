@@ -59,7 +59,7 @@ export function explorationQuery(s, input) {
     decisions: decisions(s, input.subject, input.scene).slice(0, input.limit),
   };
 }
-export function explorationPlan(s, input, now) {
+export function explorationPlan(s, input, now, emptyQuestions = []) {
   const breadth=breadthSnapshot(s,input.subject,config(s).history_window);
   const domainCount=c=>breadth.domains.find(d=>d.domain===collectionDomain(c).name)?.count??0;
   const successful=readingHistory(s,input.subject);
@@ -88,6 +88,10 @@ export function explorationPlan(s, input, now) {
     )
     .map(q=>({...q,domain:questionDomain(q,s.collections[q.collection_id]),last_read_at:questionLast(q),breadth_reason:"先补近期少读领域，再优先长期未读问题；不按最近修改时间追逐"}))
     .sort((a,b)=>(breadth.domains.find(d=>d.domain===a.domain)?.count??0)-(breadth.domains.find(d=>d.domain===b.domain)?.count??0)||a.last_read_at-b.last_read_at||a.created_at-b.created_at||a.id.localeCompare(b.id));
+  // Stable sort keeps the existing domain/age ranking among equal attempts.
+  const attempts = new Map()
+  for (const id of emptyQuestions) attempts.set(id, (attempts.get(id) ?? 0) + 1)
+  if (attempts.size) open.sort((a,b) => (attempts.get(a.id) ?? 0) - (attempts.get(b.id) ?? 0))
   const contentGroup=c=>c.members.some(id=>{const m=s.members[id];return m?.status==='accepted'&&m.tags.includes('topic')&&interestEligibility(m,s,c).eligible});
   const hasContent=Object.values(s.collections).some(c=>!c.archived_at&&c.subject===input.subject&&contentGroup(c));
   const groups = Object.values(s.collections)
@@ -187,8 +191,12 @@ export function explorationPlan(s, input, now) {
   const guard=domainBudget(s,{subject:input.subject,allowed,basePath:path,weights,targets:{deep:open.map(q=>q.domain),revisit:revisit.map(g=>g.domain),discover:discoveryDomain},config:cfg,breadth});
   path=guard.path;
   if(guard.required_domain){const rows=path==='deep'?open:path==='revisit'?revisit:null;if(rows){const index=rows.findIndex(row=>row.domain===guard.required_domain);if(index>0)rows.unshift(...rows.splice(index,1))}}
+  const retryReason = !attempts.size || path !== 'deep' ? '' : attempts.has(open[0].id)
+    ? '。优先规则与领域约束下仍需继续已尝试的问题。'
+    : '。本次已有问题检索落空，优先探索尚未尝试的合格问题。'
   return {
     algorithm: "exploration-v1",
+    ...(emptyQuestions.length ? {empty_question_ids:emptyQuestions} : {}),
     breadth_guard:guard,
     selected_domain:guard.selected_domain,
     reading_limit:guard.reading_limit,
@@ -202,7 +210,7 @@ export function explorationPlan(s, input, now) {
     weights,
     available,
     unavailable: paths.filter((p) => !available[p]),
-    reason: `选择 ${path}：目标比例 ${Math.round(cfg.ratios[path] * 100)}%，最近 ${recent.length} 次实际曝光中占 ${counts[path]} 次，当前欠额 ${weights[path].toFixed(3)}；不可用路径暂时排除，零比例路径不参与。${guard.reason}`,
+    reason: `选择 ${path}：目标比例 ${Math.round(cfg.ratios[path] * 100)}%，最近 ${recent.length} 次实际曝光中占 ${counts[path]} 次，当前欠额 ${weights[path].toFixed(3)}；不可用路径暂时排除，零比例路径不参与。${guard.reason}${retryReason}`,
     breadth,
     questions: open.slice(0, input.limit),
     revisit: revisit.slice(0, input.limit),
@@ -226,7 +234,7 @@ export function validateExploration(s, input, now) {
   const x = input.exploration;
   if (x.state_version !== hash(s))
     throw Error("Exploration state conflict; plan again");
-  const plan = explorationPlan(s, { ...input, seed: x.seed, limit: 50 }, now);
+  const plan = explorationPlan(s, { ...input, seed: x.seed, limit: 50 }, now, x.empty_question_ids);
   if (plan.path !== x.path) throw Error("Exploration path does not match plan");
   for (const o of input.options) {
     if (!o.eligible) continue;

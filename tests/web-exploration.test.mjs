@@ -513,3 +513,19 @@ test('abstract recovery binds public search evidence to same decision, reads rep
     assert.equal(f.store.state().concepts.decisions[args.decision_id].exploration.exposure.source_ids.length,1)
   }
 })
+
+test('an empty round rotates to another eligible question and preserves selection replay', async t => {
+  const f = await fixture(t)
+  await f.engine.call('exploration_question', {key:'followup', collection_id:f.group,
+    source_ids:['topic'], question:'如何比较不同项目的维护成本？', next_step:'查项目记录', reason:'比较样本'})
+  const first = await f.next()
+  await f.prepare()
+  await f.native('web_search', {queries}, {sources:[]})
+  const second = await f.next()
+  assert.notEqual(second.packet.target.question_id, first.packet.target.question_id)
+  assert.equal(second.reading_budget.completed, 0)
+  await f.searchAndSelect()
+  const decision = Object.values(f.store.state().concepts.decisions).at(-1)
+  assert.equal(decision.exploration.target.question_id, second.packet.target.question_id)
+  assert.equal((await f.engine.call('decision_replay',{preview_id:decision.preview_id})).matches,true)
+})

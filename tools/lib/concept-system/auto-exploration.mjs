@@ -8,6 +8,33 @@ import {requiredDomain} from './breadth.mjs'
 import {VideoReads,isVideoTextKind} from './video-reads.mjs'
 import {runFeed} from './operations.mjs'
 
+// Only finished search rounds contribute attempts. A stale plan or a repeated
+// exploration_next call must not count a question twice.
+function finishRound(store, cycle, reason) {
+  const run_id = cycle.id + '-r' + cycle.round
+  return store.transaction({}, (d, emit) => {
+    const current = d.state.auto_exploration_cycles[cycle.id]
+    if (current.round !== cycle.round || current.status !== 'active') return
+    const search = d.state.feed_searches?.[run_id]
+    const target = search && store.getObject(search.packet).content.target
+    current.round_outcomes ??= []
+    current.round_outcomes.push({
+      round: current.round,
+      question_id: target?.question_id ?? null,
+      readings: (current.completed_reads ?? []).filter(r => r.round === current.round).length,
+      reason,
+    })
+    if (d.state.web_runs?.[run_id]) d.state.web_runs[run_id].phase = 'closed'
+    if (current.round >= current.max_rounds)
+      return settleExplorationCycle(d, emit, cycle.id, reason, 'max_rounds')
+    current.round++
+    current.round_limits ??= {}
+    current.round_limits[current.round] = readingBudget(current).remaining
+    emit('exploration.cycle_continued', {cycle_id:cycle.id, previous_run_id:run_id, reason,
+      reading_budget:readingBudget(current)}, {source:'automatic_exploration'})
+  })
+}
+
 // Persistent orchestration is shared by every scheduled wake. The model supplies
 // evidence-based judgments and reflections; it cannot mark a page as delivered.
 export async function nextExploration(store,{cycle_id},{signal,feed=runFeed,readConfig=config}={}) {
@@ -43,14 +70,8 @@ export async function nextExploration(store,{cycle_id},{signal,feed=runFeed,read
   if(['web','both'].includes(state.feed_searches?.[run_id]?.resource_source)) {
     const out=await new WebExploration(store).next(cycle,args)
     if(out.status!=='round_exhausted')return out
-    if(cycle.round>=cycle.max_rounds)return store.transaction({},(d,emit)=>{
-      d.state.web_runs[run_id].phase='closed';return settleExplorationCycle(d,emit,cycle_id,out.reason,'max_rounds')
-    })
-    await store.transaction({},(d,emit)=>{
-      d.state.web_runs[run_id].phase='closed'
-      const current=d.state.auto_exploration_cycles[cycle_id];current.round++;current.round_limits??={};current.round_limits[current.round]=readingBudget(current).remaining
-      emit('exploration.cycle_continued',{cycle_id,previous_run_id:run_id,reason:out.reason,reading_budget:readingBudget(current)},{source:'automatic_exploration'})
-    })
+    const result = await finishRound(store, cycle, out.reason)
+    if (result) return result
     return nextExploration(store,{cycle_id},{signal,feed,readConfig})
   }
   const slate=await feed(args,{signal})
@@ -98,13 +119,7 @@ export async function nextExploration(store,{cycle_id},{signal,feed=runFeed,read
     if(!readingBudget(cycle).remaining)return store.transaction({},(d,emit)=>settleExplorationCycle(d,emit,cycle_id,'已达到本次夜间实际阅读上限','reading_limit'))
     // Continue the rest of this exact slate before planning another search.
   }
-  if(cycle.round>=cycle.max_rounds)return store.transaction({},(d,emit)=>settleExplorationCycle(d,emit,cycle_id,'三轮实际检索已结束；按实际读完条数收工，未读内容不计入','max_rounds'))
-  await store.transaction({},(d,emit)=>{
-    const current=d.state.auto_exploration_cycles[cycle_id]
-    if(current.round===cycle.round) {
-      current.round++;current.round_limits??={};current.round_limits[current.round]=readingBudget(current).remaining
-      emit('exploration.cycle_continued',{cycle_id,previous_run_id:run_id,round:current.round,reading_budget:readingBudget(current),reason:'本轮清单已处理，阅读预算仍有剩余，继续正常检索与选片'},{source:'automatic_exploration'})
-    }
-  })
+  const result = await finishRound(store, cycle, '本轮清单已处理，按实际阅读条数结算')
+  if (result) return result
   return nextExploration(store,{cycle_id},{signal,feed,readConfig})
 }

@@ -41,12 +41,12 @@ export function stanceMembers(state) {
     .slice(0, 8);
 }
 export const candidateText = (v) => `${v.t}\n${v.description ?? ""}`;
-export function explorationForFeed(state, seed, now) {
+export function explorationForFeed(state, seed, now, emptyQuestions) {
   if (!state?.exploration && !stanceMembers(state).length) return null;
   const plan = explorationPlan(
     state,
     { subject: "fish", scene: "watch", seed: seed + ":exploration", limit: 50 },
-    now,
+    now, emptyQuestions,
   );
   let target = null;
   if (plan.path === "deep") {
@@ -302,6 +302,7 @@ export async function selectJudged(
                 exploration: {
                   path: route.path,
                   seed: route.seed,
+                  ...(route.empty_question_ids && {empty_question_ids:route.empty_question_ids}),
                   state_version: hash(s),
                   reason:
                     "feed 实际采用配置的探索路径，并由当前模型引用候选材料进行立场判断",
@@ -462,8 +463,10 @@ export async function planSearch(selector, legacyKeywords) {
     return store.transaction(
       { key: "feed-plan-request:" + runId, input },
       (d, emit) => {
+        const cycle = Object.values(d.state.auto_exploration_cycles ?? {}).find(c => runId === c.id + '-r' + c.round);
+        const emptyQuestions = (cycle?.round_outcomes ?? []).filter(r => r.readings === 0 && r.question_id).map(r => r.question_id);
         const state = d.state.concepts,
-          route = explorationForFeed(state, selector.seed, store.now()),
+          route = explorationForFeed(state, selector.seed, store.now(), emptyQuestions),
           target = route.target;
         const interests=selector.interestSnapshot?.(state,store.now())??null;
         const packet = {
