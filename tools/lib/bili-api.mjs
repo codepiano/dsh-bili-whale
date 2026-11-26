@@ -151,7 +151,7 @@ export async function apiGet(input, headers = {}, opts = {}) {
       '/x/player/playurl': '/x/player/wbi/playurl',
     }
     if (url.hostname === 'api.bilibili.com' && signedPaths[url.pathname]) {
-      const nav = await apiGet('https://api.bilibili.com/x/web-interface/nav', headers, { noCache })
+      const nav = await apiGet('https://api.bilibili.com/x/web-interface/nav', headers, { noCache, signal: opts.signal })
       if (!nav.data?.wbi_img) return { code: -1, message: `WBI 签名不可用：${nav.message || 'nav 未返回密钥'}` }
       url.pathname = signedPaths[url.pathname]
       url.search = signWbi(Object.fromEntries(url.searchParams), nav.data.wbi_img)
@@ -162,7 +162,7 @@ export async function apiGet(input, headers = {}, opts = {}) {
     if (biliHost && !noCacheEnv() && bannedUntilNow()) return stale() ?? { code: -412, message: 'B站风控退避中，请稍后重试' }
 
     logReq(false, url.pathname)
-    const response = await fetch(url.href, { headers, signal: AbortSignal.timeout(30000) })
+    const response = await fetch(url.href, { headers, signal: opts.signal ? AbortSignal.any([opts.signal, AbortSignal.timeout(30000)]) : AbortSignal.timeout(30000) })
 
     // HTTP 412/429：平台级风控 → 熔断（默认 5 分钟，指数退避封顶 30 分钟）
     if (biliHost && (response.status === 412 || response.status === 429)) {

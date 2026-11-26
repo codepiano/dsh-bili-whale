@@ -289,9 +289,9 @@ export class WebExploration {
           const u=new URL(url),match=/(?:^|\/)video\/(BV[0-9A-Za-z]{10})(?:\/|$)/.exec(u.pathname)
           if(/(^|\.)bilibili\.com$/.test(u.hostname)&&match){bvid=match[1];url='https://www.bilibili.com/video/'+bvid}
           if(completed.some(r=>bvid?r.bvid===bvid:r.url===url))return
-          pool.push({url,title:String(raw.title??url).slice(0,1000),snippet:String(raw.snippet??'').slice(0,3000),published_at:raw.publishedAt??null,kind:bvid?'video':'web',...(bvid?{bvid}:{}),providers})
+          pool.push({url,title:String(raw.title??url).slice(0,1000),snippet:String(raw.snippet??'').slice(0,3000),published_at:raw.publishedAt??null,kind:bvid?'video':'web',...(bvid?{bvid}:{}),...(bvid && raw.video_info ? {video_info:raw.video_info} : {}),providers})
         }catch{}}
-        for(const c of (result.value.bilibili?.candidates??[]))if(/^BV[0-9A-Za-z]{10}$/.test(c.bv))add(bili,{url:'https://www.bilibili.com/video/'+c.bv,title:c.t,snippet:c.description},['bilibili'])
+        for(const c of (result.value.bilibili?.candidates??[]))if(/^BV[0-9A-Za-z]{10}$/.test(c.bv))add(bili,{url:'https://www.bilibili.com/video/'+c.bv,title:c.t,snippet:c.description,video_info:c.video_info},['bilibili'])
         for(const c of result.value.sources)add(web,c,[exec.name==='fish_web_search'?'deepseek-search-api':'web_search'])
         const all=[]
         for(let rank=0;rank<Math.max(bili.length,web.length);rank++)for(const pool of [bili,web]){const c=pool[rank];if(!c)continue;const prior=all.find(x=>x.url===c.url);if(prior)prior.providers=[...new Set([...prior.providers,...c.providers])];else all.push(c)}

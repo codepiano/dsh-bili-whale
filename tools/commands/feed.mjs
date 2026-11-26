@@ -1,3 +1,4 @@
+import { enrichShortVideos } from '../lib/video-candidate-info.mjs'
 import { compactFeed } from '../lib/concept-system/feed-presentation.mjs'
 import { writeJson } from '../lib/json-output.mjs'
 import { guardedFetch as fetch } from '../lib/traffic.mjs'
@@ -312,6 +313,7 @@ for (const x of uniq) {
   diversified.push(x)
 }
 
+if (concepts.enabled && concepts.mode === 'active') await enrichShortVideos(uniq.slice(0, 8), { headers: H })
 const selection = await concepts.select({candidates:uniq,legacy:diversified,n:N,per:PER})
 if (opt.json || selection.status==='judgment_required') {
   await writeJson({...compactFeed(selection),search:compactFeed(interestSearch),candidate_count:uniq.length})
