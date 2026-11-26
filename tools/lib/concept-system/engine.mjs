@@ -1,3 +1,4 @@
+import { QUESTION_FIRST, MAX_STANCE_ADJUSTMENT } from './reading-judgment.mjs';
 import crypto from "node:crypto";
 import {assessReadingDomain} from "./reading-domain.mjs";
 import { readingFatigue } from "./breadth.mjs";
@@ -103,11 +104,12 @@ function scoreReadingEvidence(state, terms) {
 
 export function scoreDecision(
   state, input, now,
-  evidencePolicy = ["watch", "feed"].includes(input.scene) ? READING_EVIDENCE_POLICY : null,
+  evidencePolicy = input.feed_judgment?.ranking_policy === QUESTION_FIRST ? QUESTION_FIRST :
+    ["watch", "feed"].includes(input.scene) ? READING_EVIDENCE_POLICY : null,
 ) {
   const p = state.parameters;
   if (p.algorithm !== ALGORITHM) throw Error("Unsupported decision algorithm");
-  if (evidencePolicy !== null && evidencePolicy !== READING_EVIDENCE_POLICY)
+  if (![null, READING_EVIDENCE_POLICY, QUESTION_FIRST].includes(evidencePolicy))
     throw Error("Unsupported decision evidence policy");
   const exploration = validateExploration(state, input, now);
   const labels = new Set();
@@ -161,6 +163,26 @@ export function scoreDecision(
         value: base * item.relevance * item.strength * (1 - f),
       });
     }
+    if (evidencePolicy === QUESTION_FIRST) {
+      const relevance = option.question_relevance;
+      if (!Number.isFinite(relevance) || relevance < 0 || relevance > 1) throw Error("Missing question relevance");
+      const stances = terms.filter(t => t.purpose === "stance").map(t => ({
+        ...t, value: clamp(t.strength * (t.legacy_prior?.factor ?? 1) * (1 - t.fatigue), -1, 1),
+      }));
+      const supported = scoreReadingEvidence(state, stances);
+      const adjustment = MAX_STANCE_ADJUSTMENT * supported.base;
+      const base = relevance + adjustment;
+      rows.push({
+        label: option.label, target: option.target ?? null, candidate_domain: option.candidate_domain ?? null,
+        eligible: option.eligible, reason: option.reason, stance_evidence: option.stance_evidence,
+        contributions: [
+          ...terms.filter(t => t.purpose === "exploration").map(t => ({...t, value: relevance, score_weight: 1})),
+          ...supported.contributions.map(t => ({...t, score_weight: t.score_weight * MAX_STANCE_ADJUSTMENT})),
+        ],
+        question_relevance: relevance, stance_adjustment: adjustment, base, noise: 0, score: base,
+      });
+      continue;
+    }
     const { contributions, base } = evidencePolicy
       ? scoreReadingEvidence(state, terms)
       : { contributions: terms, base: mean(terms.map((term) => term.value)) };
@@ -178,12 +200,14 @@ export function scoreDecision(
   const eligible = rows.filter((r) => r.eligible);
   if (!eligible.length) throw Error("No eligible options");
   const top = Math.max(...eligible.map((r) => r.base));
+  const questionFirst = evidencePolicy === QUESTION_FIRST;
+  const tiedAtTop = eligible.filter(r => r.base === top).length > 1;
   for (const r of eligible)
-    if (top - r.base <= p.tieBand) {
+    if (questionFirst ? tiedAtTop && r.base === top : top - r.base <= p.tieBand) {
       const u =
         parseInt(hash(`${input.seed}\n${r.label}`).slice(0, 12), 16) /
         0xffffffffffff;
-      r.noise = (u * 2 - 1) * p.noise;
+      r.noise = questionFirst ? u * Math.min(0.000001, p.noise) : (u * 2 - 1) * p.noise;
       r.score = r.base + r.noise;
     }
   const ordered = [...eligible].sort(

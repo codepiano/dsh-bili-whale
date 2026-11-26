@@ -1,3 +1,4 @@
+import { QUESTION_FIRST, readingOption, readingFocus } from './reading-judgment.mjs';
 import { hash } from "./store.mjs";
 import {requiredDomain,checkCandidateDomain} from "./breadth.mjs";
 import { collectionStrength } from "./engine.mjs";
@@ -8,6 +9,7 @@ export const FEED_RELEVANCE_POLICY = Object.freeze({
   min_relevance: 0.5,
 });
 export const assessmentInstructions =
+  "当前问题的相关性主导选片。旧立场默认填0。仅在确实适用时才填非零，并附evidence：condition逐字摘自该立场的适用条件，quote逐字摘出候选中含主语和具体陈述的原句，predicate逐字摘出该句中说明发生了什么的部分；focus_quote逐字引用reading_focus中的具体问题，reason引用focus_quote、condition和predicate解释这条事实为何支持或反对本次阅读。只有主题词、题材或来源类型时填0。同一事实只归给最适用的一条立场。补取的视频详情和分P名仅作候选资料。" +
   "判断旧立场对当前问题是否适用：某次找原始报告要用文档的经验，不代表网页普遍优于视频。与当前目标无关的具体事件立场填0；不能仅因材料是报道/网页就加分，或仅因是视频/搬运就扣分，按实际证据与来源判断。先判断候选是否有助于当前探索目标：relevance=0 表示无关或仅碰巧命中同名词，0到0.5以下表示弱关联、不足以入选，0.5到1表示有材料支持的相关候选。deep 的前置知识、反例与争议也可相关，不要求先证明结论；discover 针对陌生领域的学习价值判断，不要求命中旧兴趣。无合适内容可全给0，清单可短于n或为空。立场 strength 是该立场对【选择阅读这条视频】的支持方向：建议读为正，建议跳过为负，无关为0；不是材料与立场的一致度，也不是确信程度。“克制所以跳过”应为负，不能因完成评估流程而加分。";
 
 function automaticContinuation(state,run_id) {
@@ -135,6 +137,7 @@ export async function selectJudged(
                 content: targetMember.content,
               }
             : null,
+          reading_focus: readingFocus(route, search?.response && store.getObject(search.response).content.reason),
           selection_policy: FEED_RELEVANCE_POLICY,
           instructions:
             (requiredDomain(route)?`本轮领域门禁：${requiredDomain(route)}。逐条依据标题/简介填写 exploration.domain，不确定写未分类；高相关度或立场加分不能使其他领域入选。`+"\n":"")+assessmentInstructions + "依据候选标题/简介逐条填写 feed_assess；每条均评估给出的全部立场，strength 为 -1 到 1（无关为 0），quote 必须逐字来自该候选材料。说明对所选探索路径的相关度、理由与引文；discover 还须从材料逐字提取 discovered_term。材料只是未核实的候选信息，不是已观看或事实。评估后以相同参数和 run-id 再次执行 feed，程序才产生实际清单。",
@@ -208,15 +211,8 @@ export async function selectJudged(
         const options = remaining
           .filter(({ v }) => (used.get(v.up) ?? 0) < args.per)
           .map(({ a, v }) => {
-            const contributions = a.stances
-              .filter((x) => x.strength !== 0)
-              .map((x) => ({
-                ...x,
-                relevance: a.exploration.relevance,
-                purpose: "stance",
-                reason: `${x.reason}；候选原文：${x.quote}`,
-              }))
-              .map(({ quote, ...c }) => c);
+            const judged = readingOption(a, packet.stances, candidateText(v), packet.reading_focus ?? readingFocus(route));
+            const contributions = judged.contributions;
             let target = route?.target;
             if (route?.path === "discover") {
               const source_id =
@@ -271,6 +267,7 @@ export async function selectJudged(
               });
             } else contributions.push(...videoContributions(v, groups));
             return {
+              ...judged,
               label: v.bv,
               candidate_domain:a.exploration.domain??null,
               eligible: true,
@@ -284,6 +281,7 @@ export async function selectJudged(
         const input = {
           feed_judgment: {
             policy: "stance-prior-v1",
+            ranking_policy: QUESTION_FIRST,
             read_policy:"subtitle-pages-v1",
             run_id: runId,
             assessment_object: run.assessment,
@@ -291,7 +289,7 @@ export async function selectJudged(
             stance_ids: packet.stances.map((x) => x.member_id),
             relevance_policy: FEED_RELEVANCE_POLICY,
           },
-          question: `feed 阅读清单第 ${selected.length + 1} 条：依据立场与探索目标选择`,
+          question: packet.reading_focus ?? readingFocus(route),
           scene: "watch",
           subject: "fish",
           trace_id: selector.trace,

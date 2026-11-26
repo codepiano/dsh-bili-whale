@@ -57,7 +57,7 @@ async function fixture(t,kind='deep',maxVideos=1,cycleId='night-web') {
   async function searchAndSelect(relevance=0.9) {
     await prepare();await native('web_search',{queries},{sources:[candidate],truncated:false})
     let out=await next();assert.equal(out.next_action,'resource_assess')
-    const input={...out.required_arguments,url,exploration:{relevance,reason:'候选提供返工成本证据',quote:'升级后返工花了两天'},stances:out.packet.stances.map(s=>({collection_id:s.collection_id,member_id:s.member_id,strength:0.5,reason:'支持读原始记录',quote:'附复现与修复提交'})),...(kind==='discover'?{discovered_term:'返工工时'}:{})}
+    const input={...out.required_arguments,url,exploration:{relevance,reason:'候选提供返工成本证据',quote:'升级后返工花了两天'},stances:out.packet.stances.map(s=>({collection_id:s.collection_id,member_id:s.member_id,strength:0.5,reason:'返工花了两天是证据优先所要求的记录，可用来测量返工成本',quote:'升级后返工花了两天',evidence:{focus_quote:'返工成本',condition:'证据优先',predicate:'返工花了两天'}})),...(kind==='discover'?{discovered_term:'返工工时'}:{})}
     await engine.call('resource_assess',input);assert.deepEqual(await engine.call('resource_assess',input),{status:'assessed',continue_with:{tool:'exploration_next',arguments:{cycle_id:cycleId}}})
     return {out:await next(),input}
   }
@@ -93,7 +93,7 @@ test('native search → cited judgments → native body → delivery → progres
   assert.ok(replay.matches)
   const terms=replay.result.rows.find(r=>r.label===decision.selected).contributions
   assert.deepEqual(new Set(terms.map(c=>c.purpose)),new Set(['stance','exploration']))
-  assert.deepEqual(terms.map(c=>c.score_weight),[0.5,0.5])
+  assert.deepEqual(terms.map(c=>c.score_weight),[1,0.04])
 })
 test('search receipts are session scoped; invalid quotes, incomplete stances and caller-provided bodies cannot create reads',async t=>{
   const f=await fixture(t);let out=await f.prepare()
@@ -578,4 +578,32 @@ test('same-URL retry records its reason once and binds to the failed provider re
   assert.equal(page.next_action,'resource_read_page')
   assert.equal(f.web.page(page.arguments).text,'维护成本项目的公开调查原文。')
   await assert.rejects(f.engine.call('resource_recover',args),/current failed fetch/)
+})
+
+test('both sources can win on question relevance even against a supported stance, with no reserved seat',async t=>{
+  for(const best of ['video','web']) {
+    const f=await fixture(t),bv='BV0000000011'
+    await f.prepare('both')
+    await f.native('web_search',{queries},{sources:[candidate],bilibili:{status:'ok',candidates:[{bv,t:candidate.title,description:candidate.snippet}]}})
+    let out=await f.next()
+    for(let i=0;i<2;i++){
+      const current=out.packet.candidates[0], preferred=current.kind===best
+      await f.engine.call('resource_assess',{...out.required_arguments,url:current.url,
+        exploration:{quote:'升级后返工花了两天',reason:'有返工成本记录',relevance:preferred ? 0.90 : 0.75},
+        stances:out.packet.stances.map(s=>({collection_id:s.collection_id,member_id:s.member_id,
+          strength:preferred?-1:1,quote:'升级后返工花了两天',
+          reason:preferred?'证据优先要求多次测量，返工花了两天只有一次记录，作为返工成本证据有限':'证据优先，返工花了两天给出了返工成本',
+          evidence:{condition:'证据优先',predicate:'返工花了两天',focus_quote:'返工成本'}}))})
+      out=await f.next()
+    }
+    const run=f.store.state().web_runs[out.run_id]
+    assert.deepEqual(run.selected.map(c=>c.kind),[best])
+    const decision=f.store.state().concepts.decisions[run.selected[0].decision_id]
+    const replay=f.engine.replay(decision.preview_id)
+    assert.ok(replay.matches)
+    const [winner,other]=replay.result.rows.toSorted((a,b)=>b.score-a.score)
+    assert.equal(winner.stance_adjustment,-.04)
+    assert.equal(other.stance_adjustment,.04)
+    assert.equal(winner.noise,0)
+  }
 })

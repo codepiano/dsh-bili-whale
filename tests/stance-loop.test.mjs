@@ -109,12 +109,13 @@ function assessments(packet) {
       quote: v.t,
     },
     discovered_term: i ? "测量误差" : "漂亮口号",
-    stances: packet.stances.map((s) => ({
+    stances: packet.stances.map((s, index) => ({
       collection_id: s.collection_id,
       member_id: s.member_id,
-      strength: i ? 0.9 : -0.8,
+      strength: index ? 0 : i ? 0.9 : -0.8,
       quote: v.t,
-      reason: i ? "候选给出检验方法，支持该准则" : "候选只有承诺，应谨慎对待",
+      evidence: {focus_quote:"可验证的方法",condition:"保留证据", predicate:i ? "提供检验步骤" : "保证成功"},
+      reason: i ? "提供检验步骤可以保留证据，有助寻找可验证的方法" : "保证成功没有保留证据，缺少可验证的方法",
     })),
   }));
 }
@@ -139,15 +140,11 @@ test("beliefs change actual slate through cited judgments, without becoming topi
     preview = store.getObject(saved.object).content;
   for (const row of preview.rows) {
     const target = row.contributions.find((term) => term.purpose === "exploration");
-    const stance = row.contributions.find((term) => term.member_id === target.member_id && term.purpose === "stance");
-    assert.equal(target.score_weight, 1 / 12);
-    assert.equal(stance.score_weight, target.score_weight);
+    assert.equal(target.score_weight, 1);
+    assert.equal(row.question_relevance, 1);
+    assert.equal(row.contributions.filter(c=>c.purpose==="stance").length, 1);
+    assert.ok(Math.abs(row.stance_adjustment)<=0.04);
   }
-  assert.ok(
-    preview.rows.every(
-      (r) => r.contributions.filter((c) => c.purpose === "stance").length === 6,
-    ),
-  );
   assert.ok(
     preview.rows.find((r) => r.label === videos[1].bv).base >
       preview.rows.find((r) => r.label === videos[0].bv).base,

@@ -1,3 +1,4 @@
+import { QUESTION_FIRST, readingOption, readingFocus } from './reading-judgment.mjs'
 import {readingDomainRequest} from './reading-domain.mjs'
 import { readingDomain,requiredDomain,checkCandidateDomain } from './breadth.mjs';
 import {readingBudget,recordCompletedRead,settleExplorationCycle} from './exploration-budget.mjs'
@@ -59,8 +60,8 @@ export class WebExploration {
     if(run.phase==='search_failed'||run.phase==='empty')return {...base,status:'round_exhausted',reason:run.error??'本轮没有相关且可读取的候选'}
     if(run.phase==='judgment') {
       const candidate=run.candidates.find(c=>!run.assessments[c.url])
-      if(candidate)return {...base,status:'resource_judgment_required',next_action:'resource_assess',required_arguments:{run_id,key:run_id+':'+hash(candidate.url).slice(0,16)},packet:{...compactFeed(full),status:'resource_judgment_required',candidates:[candidate],selection_policy:FEED_RELEVANCE_POLICY,candidate_pool:run.candidate_pool,assessment_progress:{assessed:Object.keys(run.assessments).length,total:run.candidates.length},instructions:(requiredDomain(full.exploration)?`领域门禁：${requiredDomain(full.exploration)}；依据候选标题/摘要填写exploration.domain，不确定写未分类，不能为入选更改标签。`:'')+assessmentInstructions+'已确认是同稿译文/重复转载且没有新增信息时，填写duplicate_of指向本轮已知原稿URL；程序只给同稿组一个阅读名额，不用抬高视频或网页分数。只评当前URL，完整覆盖全部立场，引文来自实际标题/摘要。相关度低于0.5不选，strength是选择阅读的支持方向，无关填0。程序统一比较B站视频与网页候选，不因来源而抬分。搜索摘要不等于正文读完；discover必须提取真实陌生术语。'}}
-      await this.select(run_id,full,{...cycle,n:args.n})
+      if(candidate)return {...base,status:'resource_judgment_required',next_action:'resource_assess',required_arguments:{run_id,key:run_id+':'+hash(candidate.url).slice(0,16)},packet:{...compactFeed(full),reading_focus:readingFocus(full.exploration,response.reason),status:'resource_judgment_required',candidates:[candidate],selection_policy:FEED_RELEVANCE_POLICY,candidate_pool:run.candidate_pool,assessment_progress:{assessed:Object.keys(run.assessments).length,total:run.candidates.length},instructions:(requiredDomain(full.exploration)?`领域门禁：${requiredDomain(full.exploration)}；依据候选标题/摘要填写exploration.domain，不确定写未分类，不能为入选更改标签。`:'')+assessmentInstructions+'已确认是同稿译文/重复转载且没有新增信息时，填写duplicate_of指向本轮已知原稿URL；程序只给同稿组一个阅读名额，不用抬高视频或网页分数。只评当前URL，完整覆盖全部立场，引文来自实际标题/摘要。相关度低于0.5不选，strength是选择阅读的支持方向，无关填0。程序统一比较B站视频与网页候选，不因来源而抬分。搜索摘要不等于正文读完；discover必须提取真实陌生术语。'}}
+      await this.select(run_id,full,{...cycle,n:args.n},readingFocus(full.exploration,response.reason))
       return this.next(cycle,args)
     }
     const videoRows=store.journal.use(db=>db.prepare("SELECT payload FROM video_reads WHERE json_extract(payload,'$.feed.run_id')=? ORDER BY rowid DESC").all(run_id).map(r=>JSON.parse(r.payload)))
@@ -194,7 +195,7 @@ export class WebExploration {
       return {status:'assessed',continue_with:continuation(run.cycle_id)}
     })
   }
-  select(run_id,packet,cycle) {
+  select(run_id,packet,cycle,focus = readingFocus(packet.exploration)) {
     const {store}=this
     return store.transaction({key:'resource-select:'+run_id,input:{run_id}},(d,emit)=>{
       const run=d.state.web_runs[run_id],s=d.state.concepts,route=packet.exploration
@@ -205,7 +206,8 @@ export class WebExploration {
       const family=url=>{const seen=new Set();let ref=url;while(run.assessments[ref]?.duplicate_of&&!seen.has(ref)){seen.add(ref);ref=run.assessments[ref].duplicate_of}return ref}
       const options=relevant.map(c=>{
         const a=run.assessments[c.url];let target=route.target
-        const contributions=a.stances.map(x=>({...x,relevance:1,purpose:'stance',reason:x.reason+'；原文：'+x.quote})).map(({quote,...x})=>x)
+        const judged=readingOption(a,packet.stances,excerpt(c),focus)
+        const contributions=judged.contributions
         if(route.path==='discover') {
           const source={id:'web-search-'+hash(c.url).slice(0,32),actor:'third_party',type:'web',excerpt:excerpt(c),ref:c.url}
           if(s.sources[source.id]&&hash(s.sources[source.id])!==hash(source))source.id+='-'+hash(source).slice(0,12)
@@ -218,15 +220,15 @@ export class WebExploration {
           if(!member)throw Error('Target has no eligible contribution member')
           contributions.push({collection_id:target.collection_id,member_id:member.id,relevance:a.exploration.relevance,strength:1,purpose:'exploration',reason:a.exploration.reason})
         }
-        return {label:c.url,eligible:true,reason:a.exploration.reason,target,contributions,candidate_domain:a.exploration.domain??null}
+        return {...judged,label:c.url,eligible:true,reason:a.exploration.reason,target,contributions,candidate_domain:a.exploration.domain??null}
       })
       let remaining=options
       run.selected=[]
       while(remaining.length&&run.selected.length<Math.min(cycle.n??1,relevant.length,route.reading_limit??cycle.n??1)) {
-        const input={question:'选择有助于当前问题的网页正文',scene:'watch',subject:'fish',seed:run_id+':web:'+run.selected.length,trace_id:'resource-'+hash(run_id).slice(0,32),options:remaining,exploration:{path:route.path,seed:route.seed,...(route.empty_question_ids && {empty_question_ids:route.empty_question_ids}),state_version:hash(s),reason:'按真实网页候选和立场判断选择'},feed_judgment:{run_id,read_policy:'resource-page-v1',relevance_policy:FEED_RELEVANCE_POLICY}}
+        const input={question:focus,scene:'watch',subject:'fish',seed:run_id+':web:'+run.selected.length,trace_id:'resource-'+hash(run_id).slice(0,32),options:remaining,exploration:{path:route.path,seed:route.seed,...(route.empty_question_ids && {empty_question_ids:route.empty_question_ids}),state_version:hash(s),reason:'依据当前问题相关性及有证据的适用立场选择'},feed_judgment:{run_id,ranking_policy:QUESTION_FIRST,read_policy:'resource-page-v1',relevance_policy:FEED_RELEVANCE_POLICY}}
         const scored=scoreDecision(s,input,store.now());input.feed_judgment.read_policy=run.candidates.find(c=>c.url===scored.winner).kind==='video'?'subtitle-pages-v1':'resource-page-v1';const object=store.object(scored),state_object=store.object(s),preview_id=crypto.randomUUID()
         d.savePreview(preview_id,{object:object.hash,state_object:state_object.hash,committed:null});emit('decision.previewed',{id:preview_id,object,state_object,winner:scored.winner,state_version:scored.state_version},{trace_id:input.trace_id,source:'web'})
-        const decision=commitScoredDecision(s,scored,{preview_id,reason:'选入网页阅读清单，尚未阅读'},store.now())
+        const decision=commitScoredDecision(s,scored,{preview_id,reason:'选入阅读清单，尚未阅读'},store.now())
         d.savePreview(preview_id,{object:object.hash,state_object:state_object.hash,committed:decision.id})
         run.selected.push({...run.candidates.find(c=>c.url===decision.selected),decision_id:decision.id,source_family:family(decision.selected)})
         remaining=remaining.filter(o=>family(o.label)!==family(decision.selected))

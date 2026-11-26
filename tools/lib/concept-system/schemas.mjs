@@ -119,6 +119,11 @@ export const schemas = {
                       strength: z.number().finite().min(-1).max(1).describe('该立场对选择阅读的支持方向：建议读为正，建议跳过为负，无关为0；不是立场一致度或确信程度。'),
                       reason: text,
                       quote: z.string().min(1).max(500),
+                      evidence: z.object({
+                        focus_quote: z.string().trim().min(1).max(500).describe('逐字摘自本轮 reading_focus，说明关联到当前问题的哪一点'),
+                        condition: z.string().trim().min(1).max(500).describe('逐字引用旧立场中适用于本问题的条件'),
+                        predicate: z.string().trim().min(1).max(500).describe('逐字引用该候选引文中的具体陈述部分，保留引文中的主语或对象作为上下文'),
+                      }).strict().optional(),
                     })
                     .strict(),
                 )

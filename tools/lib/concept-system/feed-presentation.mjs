@@ -14,7 +14,7 @@ export function compactFeed(packet) {
       ...(packet.trace_id ? {details:{tool:'trace_get',arguments:{trace_id:packet.trace_id},instructions:'按事件读取完整选择依据与证据对象。'}} : {})};
   }
   if (!['search_plan_required', 'judgment_required'].includes(packet?.status)) return packet;
-  const result = pick(packet, ['status', 'run_id', 'seed', 'mode', 'n', 'per', 'state_version', 'selected', 'stances', 'candidates', 'target_member', 'selection_policy', 'instructions', 'assessment_progress']);
+  const result = pick(packet, ['status', 'run_id', 'seed', 'mode', 'n', 'per', 'state_version', 'selected', 'stances', 'candidates', 'target_member', 'reading_focus', 'selection_policy', 'instructions', 'assessment_progress']);
   if(packet.status==='search_plan_required') {
     result.source_options=['both','bilibili','web'];
     if(!result.instructions?.includes('source=both'))result.instructions=(result.instructions??'')+'\n按问题选择 source=both（双来源）、bilibili 或 web；文章、文档、论文页面和仓库README/issue/commit可选web，后续由状态机调用鱼专用fish_web_search及自行选择web_fetch/fish_web_fetch/fish_gateway_fetch。';
